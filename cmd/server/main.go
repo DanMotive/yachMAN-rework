@@ -65,7 +65,9 @@ func main() {
 
 	// Start scheduler
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()		scheduler := services.NewScheduler(services.SchedulerDeps{
+	defer cancel()
+
+	scheduler := services.NewScheduler(services.SchedulerDeps{
 			Work: workSvc, Business: bizSvc, Market: marketSvc,
 			Corp: corpSvc, Trade: tradeSvc, Notif: notifSvc, Events: eventSvc,
 			Delivery: deliverySvc,
