@@ -2,6 +2,7 @@ package webapp
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -15,11 +16,12 @@ type Handler struct {
 }
 
 type Services struct {
-	User   *services.UserService
-	City   *services.CityService
-	Market *services.MarketService
-	Events *services.EventService
-	Work   *services.WorkService
+	User    *services.UserService
+	City    *services.CityService
+	Market  *services.MarketService
+	Events  *services.EventService
+	Work    *services.WorkService
+	Payment *services.PaymentService
 }
 
 func NewHandler(svc Services) *Handler {
@@ -34,6 +36,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Get("/resources/{cityId}", h.cityResources)
 		r.Get("/works", h.listWorks)
 		r.Get("/works/{direction}", h.worksByDirection)
+		r.Get("/me", h.getMe)
+		r.Get("/me/skills", h.getMySkills)
+		r.Post("/work/start", h.startWork)
 	})
 }
 
@@ -126,4 +131,76 @@ func (h *Handler) worksByDirection(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"works": works})
+}
+
+func (h *Handler) getMe(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.URL.Query().Get("user_id")
+	if userIDStr == "" {
+		http.Error(w, `{"error":"user_id required"}`, http.StatusBadRequest)
+		return
+	}
+	var uid int64
+	if _, err := fmt.Sscanf(userIDStr, "%d", &uid); err != nil {
+		http.Error(w, `{"error":"invalid user_id"}`, http.StatusBadRequest)
+		return
+	}
+	user, err := h.services.User.GetUserByTGID(r.Context(), uid)
+	if err != nil {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"user": user})
+}
+
+func (h *Handler) getMySkills(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.URL.Query().Get("user_id")
+	if userIDStr == "" {
+		http.Error(w, `{"error":"user_id required"}`, http.StatusBadRequest)
+		return
+	}
+	var uid int64
+	if _, err := fmt.Sscanf(userIDStr, "%d", &uid); err != nil {
+		http.Error(w, `{"error":"invalid user_id"}`, http.StatusBadRequest)
+		return
+	}
+	skills, err := h.services.User.GetSkills(r.Context(), uid)
+	if err != nil {
+		http.Error(w, `{"error":"failed"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"skills": skills})
+}
+
+func (h *Handler) startWork(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		WorkID string `json:"work_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+	userIDStr := r.URL.Query().Get("user_id")
+	if userIDStr == "" {
+		http.Error(w, `{"error":"user_id required"}`, http.StatusBadRequest)
+		return
+	}
+	var uid int64
+	if _, err := fmt.Sscanf(userIDStr, "%d", &uid); err != nil {
+		http.Error(w, `{"error":"invalid user_id"}`, http.StatusBadRequest)
+		return
+	}
+	user, err := h.services.User.GetUserByTGID(r.Context(), uid)
+	if err != nil || user.CityID == nil {
+		http.Error(w, `{"error":"join a city first"}`, http.StatusBadRequest)
+		return
+	}
+	err = h.services.Work.StartWork(r.Context(), uid, req.WorkID, *user.CityID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 }

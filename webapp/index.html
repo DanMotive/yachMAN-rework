@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>ЯчМан</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <div id="app">
+        <header id="header">
+            <h1 id="city-name">ЯчМан</h1>
+        </header>
+
+        <main id="content">
+            <section id="tab-profile" class="tab active">
+                <div class="card">
+                    <h2>👤 Мой профиль</h2>
+                    <div id="profile-info"><p class="loading">Загрузка...</p></div>
+                </div>
+                <div class="card">
+                    <h2>🎯 Навыки</h2>
+                    <div id="skills-list"><p class="loading">Загрузка...</p></div>
+                </div>
+            </section>
+
+            <section id="tab-map" class="tab">
+                <div class="card">
+                    <h2>🗺 Города</h2>
+                    <div id="cities-list"><p class="loading">Загрузка...</p></div>
+                </div>
+            </section>
+
+            <section id="tab-work" class="tab">
+                <div class="card">
+                    <h2>🔨 Работа</h2>
+                    <div id="work-list"><p class="loading">Загрузка...</p></div>
+                </div>
+            </section>
+
+            <section id="tab-market" class="tab">
+                <div class="card">
+                    <h2>📈 Рынок</h2>
+                    <div id="market-list"><p class="loading">Загрузка...</p></div>
+                </div>
+            </section>
+        </main>
+
+        <nav id="bottom-nav">
+            <button class="nav-btn active" data-tab="profile">👤</button>
+            <button class="nav-btn" data-tab="map">🗺</button>
+            <button class="nav-btn" data-tab="work">🔨</button>
+            <button class="nav-btn" data-tab="market">📈</button>
+        </nav>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
