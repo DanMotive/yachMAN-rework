@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -17,49 +16,59 @@ func NewStockService(pool *pgxpool.Pool, ledger *LedgerService) *StockService {
 	return &StockService{pool: pool, ledger: ledger}
 }
 
-// BuyShares places a buy order for corporation shares.
 func (s *StockService) BuyShares(ctx context.Context, userID, corpID int64, amount int, pricePerShare int) error {
-	return s.pool.BeginTxFunc(ctx, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		totalCost := amount * pricePerShare
-
-		// Check balance
-		var balance int
-		err := tx.QueryRow(ctx, `SELECT balance FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&balance)
-		if err != nil {
-			return err
-		}
-		if balance < totalCost {
-			return fmt.Errorf("недостаточно средств: %d ₽", totalCost)
-		}
-
-		// Try to fill from existing sell orders (simplified: just create the order)
-		// In full implementation, we'd match buy/sell orders here
-		_, err = tx.Exec(ctx,
-			`INSERT INTO share_orders (corporation_id, user_id, order_type, price_per_share, amount, operation_id)
-			 VALUES ($1, $2, 'buy', $3, $4, gen_random_uuid())`,
-			corpID, userID, pricePerShare, amount)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
 		return err
-	})
+	}
+	defer tx.Rollback(ctx)
+
+	totalCost := amount * pricePerShare
+
+	var balance int
+	err = tx.QueryRow(ctx, `SELECT balance FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&balance)
+	if err != nil {
+		return err
+	}
+	if balance < totalCost {
+		return fmt.Errorf("недостаточно средств: %d ₽", totalCost)
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO share_orders (corporation_id, user_id, order_type, price_per_share, amount, operation_id)
+		 VALUES ($1, $2, 'buy', $3, $4, gen_random_uuid())`,
+		corpID, userID, pricePerShare, amount)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
-// SellShares places a sell order for corporation shares.
 func (s *StockService) SellShares(ctx context.Context, userID, corpID int64, amount int, pricePerShare int) error {
-	return s.pool.BeginTxFunc(ctx, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		// Check shares
-		var held int
-		err := tx.QueryRow(ctx,
-			`SELECT COALESCE(amount, 0) FROM shares WHERE corporation_id = $1 AND user_id = $2`,
-			corpID, userID).Scan(&held)
-		if err != nil || held < amount {
-			return fmt.Errorf("недостаточно акций: %d/%d", held, amount)
-		}
-
-		_, err = tx.Exec(ctx,
-			`INSERT INTO share_orders (corporation_id, user_id, order_type, price_per_share, amount, operation_id)
-			 VALUES ($1, $2, 'sell', $3, $4, gen_random_uuid())`,
-			corpID, userID, pricePerShare, amount)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
 		return err
-	})
+	}
+	defer tx.Rollback(ctx)
+
+	var held int
+	err = tx.QueryRow(ctx,
+		`SELECT COALESCE(amount, 0) FROM shares WHERE corporation_id = $1 AND user_id = $2`,
+		corpID, userID).Scan(&held)
+	if err != nil || held < amount {
+		return fmt.Errorf("недостаточно акций: %d/%d", held, amount)
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO share_orders (corporation_id, user_id, order_type, price_per_share, amount, operation_id)
+		 VALUES ($1, $2, 'sell', $3, $4, gen_random_uuid())`,
+		corpID, userID, pricePerShare, amount)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (s *StockService) GetUserShares(ctx context.Context, userID, corpID int64) (int, error) {

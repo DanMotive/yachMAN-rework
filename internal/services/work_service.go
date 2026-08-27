@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"yachman/internal/models"
@@ -56,150 +55,140 @@ func (s *WorkService) ListWorksByDirection(ctx context.Context, direction string
 	return works, nil
 }
 
-// StartWork begins a work run for the user. Checks prerequisites atomically.
 func (s *WorkService) StartWork(ctx context.Context, userID int64, workID string, cityID int64) error {
-	return s.pool.BeginTxFunc(ctx, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		// 1. Check user exists and has no active work
-		var activeWork *string
-		var corpID *int64
-		err := tx.QueryRow(ctx,
-			`SELECT active_job, corporation_id FROM users WHERE id = $1 FOR UPDATE`, userID).
-			Scan(&activeWork, &corpID)
-		if err != nil {
-			return fmt.Errorf("user not found: %w", err)
-		}
-		if activeWork != nil {
-			return fmt.Errorf("уже выполняется работа: %s", *activeWork)
-		}
-		// Corporation owner cannot /work
-		if corpID != nil {
-			return fmt.Errorf("владелец корпорации не может использовать /work")
-		}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
 
-		// 2. Get work definition
-		var w models.WorkDefinition
-		err = tx.QueryRow(ctx,
-			`SELECT id, name, direction, required_xp, duration_minutes, payout, xp_reward, resource_type, resource_amount
-			 FROM work_definitions WHERE id = $1`, workID).Scan(
-			&w.ID, &w.Name, &w.Direction, &w.RequiredXP, &w.DurationMinutes,
-			&w.Payout, &w.XPReward, &w.ResourceType, &w.ResourceAmount)
-		if err != nil {
-			return fmt.Errorf("work not found: %w", err)
-		}
+	var activeWork *string
+	var corpID *int64
+	err = tx.QueryRow(ctx,
+		`SELECT active_job, corporation_id FROM users WHERE id = $1 FOR UPDATE`, userID).
+		Scan(&activeWork, &corpID)
+	if err != nil {
+		return fmt.Errorf("пользователь не найден: %w", err)
+	}
+	if activeWork != nil {
+		return fmt.Errorf("уже выполняется работа: %s", *activeWork)
+	}
+	if corpID != nil {
+		return fmt.Errorf("владелец корпорации не может использовать /work")
+	}
 
-		// 3. Check skill XP requirement
-		var dirXP int
-		err = tx.QueryRow(ctx,
-			`SELECT xp FROM user_skills WHERE user_id = $1 AND direction = $2`, userID, w.Direction).
-			Scan(&dirXP)
-		if err != nil {
-			dirXP = 0
-		}
-		if dirXP < w.RequiredXP {
-			return fmt.Errorf("недостаточно XP в направлении %s: %d/%d", w.Direction, dirXP, w.RequiredXP)
-		}
+	var w models.WorkDefinition
+	err = tx.QueryRow(ctx,
+		`SELECT id, name, direction, required_xp, duration_minutes, payout, xp_reward, resource_type, resource_amount
+		 FROM work_definitions WHERE id = $1`, workID).Scan(
+		&w.ID, &w.Name, &w.Direction, &w.RequiredXP, &w.DurationMinutes,
+		&w.Payout, &w.XPReward, &w.ResourceType, &w.ResourceAmount)
+	if err != nil {
+		return fmt.Errorf("работа не найдена: %w", err)
+	}
 
-		// 4. Create work run
-		opID := uuid.New()
-		startAt := time.Now()
-		finishesAt := startAt.Add(time.Duration(w.DurationMinutes) * time.Minute)
+	var dirXP int
+	err = tx.QueryRow(ctx,
+		`SELECT xp FROM user_skills WHERE user_id = $1 AND direction = $2`, userID, w.Direction).
+		Scan(&dirXP)
+	if err != nil {
+		dirXP = 0
+	}
+	if dirXP < w.RequiredXP {
+		return fmt.Errorf("недостаточно XP в направлении %s: %d/%d", w.Direction, dirXP, w.RequiredXP)
+	}
 
-		_, err = tx.Exec(ctx,
-			`INSERT INTO work_runs (user_id, work_id, city_id, started_at, finishes_at, operation_id)
-			 VALUES ($1, $2, $3, $4, $5, $6)`,
-			userID, workID, cityID, startAt, finishesAt, opID)
-		if err != nil {
-			return fmt.Errorf("create work run: %w", err)
-		}
+	opID := uuid.New()
+	startAt := time.Now()
+	finishesAt := startAt.Add(time.Duration(w.DurationMinutes) * time.Minute)
 
-		// 5. Set active_job on user
-		_, err = tx.Exec(ctx,
-			`UPDATE users SET active_job = $1 WHERE id = $2`, workID, userID)
-		if err != nil {
-			return fmt.Errorf("set active job: %w", err)
-		}
+	_, err = tx.Exec(ctx,
+		`INSERT INTO work_runs (user_id, work_id, city_id, started_at, finishes_at, operation_id)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		userID, workID, cityID, startAt, finishesAt, opID)
+	if err != nil {
+		return fmt.Errorf("создание записи работы: %w", err)
+	}
 
-		return nil
-	})
+	_, err = tx.Exec(ctx, `UPDATE users SET active_job = $1 WHERE id = $2`, workID, userID)
+	if err != nil {
+		return fmt.Errorf("установка активной работы: %w", err)
+	}
+
+	return tx.Commit(ctx)
 }
 
-// CompleteWork finishes a work run and grants rewards atomically.
 func (s *WorkService) CompleteWork(ctx context.Context, runID int64) error {
-	return s.pool.BeginTxFunc(ctx, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		// 1. Get work run details
-		var userID int64
-		var workID string
-		var cityID int64
-		var completed bool
-		err := tx.QueryRow(ctx,
-			`SELECT user_id, work_id, city_id, completed FROM work_runs WHERE id = $1 FOR UPDATE`, runID).
-			Scan(&userID, &workID, &cityID, &completed)
-		if err != nil {
-			return fmt.Errorf("work run not found: %w", err)
-		}
-		if completed {
-			return nil // already completed, idempotent
-		}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
 
-		// 2. Get work definition
-		var payout, xpReward, resAmount int
-		var direction, resType string
-		err = tx.QueryRow(ctx,
-			`SELECT payout, xp_reward, direction, resource_type, resource_amount
-			 FROM work_definitions WHERE id = $1`, workID).
-			Scan(&payout, &xpReward, &direction, &resType, &resAmount)
-		if err != nil {
-			return fmt.Errorf("work def not found: %w", err)
-		}
-
-		// 3. Credit money via ledger
-		if err := s.ledger.Credit(ctx, tx, "user", userID, payout,
-			fmt.Sprintf("work payout: %s", workID)); err != nil {
-			return fmt.Errorf("credit payout: %w", err)
-		}
-
-		// 4. Add XP to skill direction
-		if err := s.users.AddXP(ctx, tx, userID, direction, xpReward); err != nil {
-			return fmt.Errorf("add xp: %w", err)
-		}
-
-		// 5. Add resource to city stock
-		_, err = tx.Exec(ctx,
-			`INSERT INTO city_resources (city_id, resource_id, stock) VALUES ($1, $2, $3)
-			 ON CONFLICT (city_id, resource_id) DO UPDATE SET stock = city_resources.stock + $3`,
-			cityID, resType, resAmount)
-		if err != nil {
-			return fmt.Errorf("add city resource: %w", err)
-		}
-
-		// 6. Update global XP and level
-		var totalXP int
-		err = tx.QueryRow(ctx,
-			`SELECT COALESCE(SUM(xp), 0) FROM user_skills WHERE user_id = $1`, userID).
-			Scan(&totalXP)
-		if err != nil {
-			totalXP = 0
-		}
-		level := calculateLevel(totalXP)
-		_, err = tx.Exec(ctx,
-			`UPDATE users SET global_xp = $1, global_level = $2, active_job = NULL WHERE id = $3`,
-			totalXP, level, userID)
-		if err != nil {
-			return fmt.Errorf("update user xp: %w", err)
-		}
-
-		// 7. Mark work run completed
-		_, err = tx.Exec(ctx,
-			`UPDATE work_runs SET completed = TRUE WHERE id = $1`, runID)
-		if err != nil {
-			return fmt.Errorf("complete work run: %w", err)
-		}
-
+	var userID int64
+	var workID string
+	var cityID int64
+	var completed bool
+	err = tx.QueryRow(ctx,
+		`SELECT user_id, work_id, city_id, completed FROM work_runs WHERE id = $1 FOR UPDATE`, runID).
+		Scan(&userID, &workID, &cityID, &completed)
+	if err != nil {
+		return fmt.Errorf("запись работы не найдена: %w", err)
+	}
+	if completed {
 		return nil
-	})
+	}
+
+	var payout, xpReward, resAmount int
+	var direction, resType string
+	err = tx.QueryRow(ctx,
+		`SELECT payout, xp_reward, direction, resource_type, resource_amount
+		 FROM work_definitions WHERE id = $1`, workID).
+		Scan(&payout, &xpReward, &direction, &resType, &resAmount)
+	if err != nil {
+		return fmt.Errorf("определение работы не найдено: %w", err)
+	}
+
+	if err := s.ledger.Credit(ctx, tx, "user", userID, payout,
+		fmt.Sprintf("work payout: %s", workID)); err != nil {
+		return fmt.Errorf("начисление оплаты: %w", err)
+	}
+
+	if err := s.users.AddXP(ctx, tx, userID, direction, xpReward); err != nil {
+		return fmt.Errorf("добавление XP: %w", err)
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO city_resources (city_id, resource_id, stock) VALUES ($1, $2, $3)
+		 ON CONFLICT (city_id, resource_id) DO UPDATE SET stock = city_resources.stock + $3`,
+		cityID, resType, resAmount)
+	if err != nil {
+		return fmt.Errorf("добавление ресурса: %w", err)
+	}
+
+	var totalXP int
+	err = tx.QueryRow(ctx,
+		`SELECT COALESCE(SUM(xp), 0) FROM user_skills WHERE user_id = $1`, userID).
+		Scan(&totalXP)
+	if err != nil {
+		totalXP = 0
+	}
+	level := calculateLevel(totalXP)
+	_, err = tx.Exec(ctx,
+		`UPDATE users SET global_xp = $1, global_level = $2, active_job = NULL WHERE id = $3`,
+		totalXP, level, userID)
+	if err != nil {
+		return fmt.Errorf("обновление XP: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `UPDATE work_runs SET completed = TRUE WHERE id = $1`, runID)
+	if err != nil {
+		return fmt.Errorf("завершение записи: %w", err)
+	}
+
+	return tx.Commit(ctx)
 }
 
-// GetActiveWork returns the user's active work run, if any.
 func (s *WorkService) GetActiveWork(ctx context.Context, userID int64) (*models.WorkRun, string, error) {
 	var run models.WorkRun
 	var workName string
@@ -217,7 +206,6 @@ func (s *WorkService) GetActiveWork(ctx context.Context, userID int64) (*models.
 	return &run, workName, nil
 }
 
-// FinishExpiredWorks completes all work runs whose timer has expired.
 func (s *WorkService) FinishExpiredWorks(ctx context.Context) (int, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id FROM work_runs

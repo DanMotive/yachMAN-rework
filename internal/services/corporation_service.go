@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"yachman/internal/models"
@@ -19,53 +18,54 @@ func NewCorporationService(pool *pgxpool.Pool, ledger *LedgerService) *Corporati
 	return &CorporationService{pool: pool, ledger: ledger}
 }
 
-// CreateCorporation costs 6M total (1M registration + 5M charter capital).
 func (s *CorporationService) CreateCorporation(ctx context.Context, ownerUserID int64, name string) error {
-	return s.pool.BeginTxFunc(ctx, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		// Check user doesn't already own a corporation
-		var existingCorp *int64
-		_ = tx.QueryRow(ctx,
-			`SELECT id FROM corporations WHERE owner_user_id = $1`, ownerUserID).Scan(&existingCorp)
-		if existingCorp != nil {
-			return fmt.Errorf("вы уже владеете корпорацией")
-		}
-
-		// Debit 6M from user via ledger
-		if err := s.ledger.Debit(ctx, tx, "user", ownerUserID, 6000000,
-			"corporation registration"); err != nil {
-			return err
-		}
-
-		// Create corporation with 5M balance (1M burns as registration fee)
-		var corpID int64
-		err := tx.QueryRow(ctx,
-			`INSERT INTO corporations (name, owner_user_id, balance, registration_fee_paid, total_shares)
-			 VALUES ($1, $2, 5000000, 1000000, 10000000) RETURNING id`,
-			name, ownerUserID).Scan(&corpID)
-		if err != nil {
-			return err
-		}
-
-		// Record ledger entry for the corporation receiving 5M charter capital
-		if err := s.ledger.Credit(ctx, tx, "corporation", corpID, 5000000,
-			"charter capital from founder"); err != nil {
-			return err
-		}
-
-		// Give all 10M shares to founder
-		_, err = tx.Exec(ctx,
-			`INSERT INTO shares (corporation_id, user_id, amount) VALUES ($1, $2, 10000000)`,
-			corpID, ownerUserID)
-		if err != nil {
-			return err
-		}
-
-		// Set user as corporation owner
-		_, err = tx.Exec(ctx,
-			`UPDATE users SET corporation_id = $1, corporation_role = 'owner' WHERE id = $2`,
-			corpID, ownerUserID)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
 		return err
-	})
+	}
+	defer tx.Rollback(ctx)
+
+	var existingCorp *int64
+	_ = tx.QueryRow(ctx,
+		`SELECT id FROM corporations WHERE owner_user_id = $1`, ownerUserID).Scan(&existingCorp)
+	if existingCorp != nil {
+		return fmt.Errorf("вы уже владеете корпорацией")
+	}
+
+	if err := s.ledger.Debit(ctx, tx, "user", ownerUserID, 6000000,
+		"corporation registration"); err != nil {
+		return err
+	}
+
+	var corpID int64
+	err = tx.QueryRow(ctx,
+		`INSERT INTO corporations (name, owner_user_id, balance, registration_fee_paid, total_shares)
+		 VALUES ($1, $2, 5000000, 1000000, 10000000) RETURNING id`,
+		name, ownerUserID).Scan(&corpID)
+	if err != nil {
+		return err
+	}
+
+	if err := s.ledger.Credit(ctx, tx, "corporation", corpID, 5000000,
+		"charter capital from founder"); err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO shares (corporation_id, user_id, amount) VALUES ($1, $2, 10000000)`,
+		corpID, ownerUserID)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx,
+		`UPDATE users SET corporation_id = $1, corporation_role = 'owner' WHERE id = $2`,
+		corpID, ownerUserID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (s *CorporationService) GetCorporation(ctx context.Context, corpID int64) (*models.Corporation, error) {
@@ -125,7 +125,6 @@ func (s *CorporationService) GetStaff(ctx context.Context, corpID int64) ([]mode
 	return staff, nil
 }
 
-// PaySalaries pays all employees in a corporation. Called hourly by scheduler.
 func (s *CorporationService) PaySalaries(ctx context.Context) error {
 	rows, err := s.pool.Query(ctx,
 		`SELECT cs.id, cs.user_id, cs.salary, cs.corporation_id
@@ -137,17 +136,23 @@ func (s *CorporationService) PaySalaries(ctx context.Context) error {
 	defer rows.Close()
 
 	for rows.Next() {
-		var staffID, userID, salary, corpID int64
+		var staffID, userID int64
+		var salary int
+		var corpID int64
 		if err := rows.Scan(&staffID, &userID, &salary, &corpID); err != nil {
 			continue
 		}
-		err := s.pool.BeginTxFunc(ctx, pgx.TxOptions{}, func(tx pgx.Tx) error {
-			return s.ledger.Transfer(ctx, tx, "corporation", corpID, salary, "user", userID, salary,
-				fmt.Sprintf("salary: staff %d", staffID))
-		})
+		tx, err := s.pool.Begin(ctx)
 		if err != nil {
-			continue // skip employees of broke corps
+			continue
 		}
+		err = s.ledger.Transfer(ctx, tx, "corporation", corpID, salary, "user", userID, salary,
+			fmt.Sprintf("salary: staff %d", staffID))
+		if err != nil {
+			tx.Rollback(ctx)
+			continue
+		}
+		tx.Commit(ctx)
 	}
 	return nil
 }

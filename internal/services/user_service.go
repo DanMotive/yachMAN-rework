@@ -20,7 +20,6 @@ func NewUserService(pool *pgxpool.Pool, ledger *LedgerService) *UserService {
 	return &UserService{pool: pool, ledger: ledger}
 }
 
-// GetOrCreateUser finds existing user or creates a new one.
 func (s *UserService) GetOrCreateUser(ctx context.Context, telegramUserID int64) (*models.User, error) {
 	var u models.User
 	err := s.pool.QueryRow(ctx,
@@ -33,7 +32,6 @@ func (s *UserService) GetOrCreateUser(ctx context.Context, telegramUserID int64)
 		&u.VipUntil, &u.DailyStreak, &u.LastDailyAt, &u.LastActiveAt, &u.CreatedAt)
 
 	if err == pgx.ErrNoRows {
-		// Create new user with 1000 starting balance
 		err = s.pool.QueryRow(ctx,
 			`INSERT INTO users (telegram_user_id, balance) VALUES ($1, 1000)
 			 RETURNING id, telegram_user_id, balance, global_level, global_xp, city_id, active_job,
@@ -46,7 +44,6 @@ func (s *UserService) GetOrCreateUser(ctx context.Context, telegramUserID int64)
 			return nil, fmt.Errorf("create user: %w", err)
 		}
 
-		// Initialize all skill directions at 0
 		for _, dir := range []string{"добыча", "лес", "топливо", "энергетика", "металлургия",
 			"строительство", "химия", "IT", "торговля", "агро",
 			"транспорт", "питание", "ремонт", "медицина", "образование",
@@ -61,7 +58,6 @@ func (s *UserService) GetOrCreateUser(ctx context.Context, telegramUserID int64)
 		return nil, fmt.Errorf("get user: %w", err)
 	}
 
-	// Update last_active_at
 	_, _ = s.pool.Exec(ctx, "UPDATE users SET last_active_at = NOW() WHERE id = $1", u.ID)
 	return &u, nil
 }
@@ -109,52 +105,57 @@ func (s *UserService) AddXP(ctx context.Context, tx pgx.Tx, userID int64, direct
 	return err
 }
 
-// ClaimDailyBonus gives the daily login bonus with streak.
-// Base 250₽, +50₽ per consecutive day up to 7 days (max 600₽).
 func (s *UserService) ClaimDailyBonus(ctx context.Context, userID int64) (int, error) {
 	var bonus int
-	err := s.pool.BeginTxFunc(ctx, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		var streak int
-		var lastDaily *time.Time
-		err := tx.QueryRow(ctx,
-			`SELECT daily_streak, last_daily_at FROM users WHERE id = $1 FOR UPDATE`,
-			userID).Scan(&streak, &lastDaily)
-		if err != nil {
-			return err
-		}
 
-		now := time.Now()
-		if lastDaily != nil {
-			hoursSince := now.Sub(*lastDaily).Hours()
-			if hoursSince < 20 {
-				return fmt.Errorf("daily bonus already claimed recently")
-			}
-			if hoursSince < 48 {
-				streak++
-			} else {
-				streak = 1
-			}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	var streak int
+	var lastDaily *time.Time
+	err = tx.QueryRow(ctx,
+		`SELECT daily_streak, last_daily_at FROM users WHERE id = $1 FOR UPDATE`,
+		userID).Scan(&streak, &lastDaily)
+	if err != nil {
+		return 0, err
+	}
+
+	now := time.Now()
+	if lastDaily != nil {
+		hoursSince := now.Sub(*lastDaily).Hours()
+		if hoursSince < 20 {
+			return 0, fmt.Errorf("ежедневный бонус уже получен")
+		}
+		if hoursSince < 48 {
+			streak++
 		} else {
 			streak = 1
 		}
-		if streak > 7 {
-			streak = 7
-		}
+	} else {
+		streak = 1
+	}
+	if streak > 7 {
+		streak = 7
+	}
 
-		bonus = 250 + (streak-1)*50
-		if bonus > 600 {
-			bonus = 600
-		}
+	bonus = 250 + (streak-1)*50
+	if bonus > 600 {
+		bonus = 600
+	}
 
-		// Credit via ledger
-		if err := s.ledger.Credit(ctx, tx, "user", userID, bonus, "daily bonus"); err != nil {
-			return err
-		}
+	if err := s.ledger.Credit(ctx, tx, "user", userID, bonus, "daily bonus"); err != nil {
+		return 0, err
+	}
 
-		_, err = tx.Exec(ctx,
-			`UPDATE users SET daily_streak = $1, last_daily_at = NOW() WHERE id = $2`,
-			streak, userID)
-		return err
-	})
-	return bonus, err
+	_, err = tx.Exec(ctx,
+		`UPDATE users SET daily_streak = $1, last_daily_at = NOW() WHERE id = $2`,
+		streak, userID)
+	if err != nil {
+		return 0, err
+	}
+
+	return bonus, tx.Commit(ctx)
 }
