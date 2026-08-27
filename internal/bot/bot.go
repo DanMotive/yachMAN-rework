@@ -72,10 +72,6 @@ func (b *Bot) handleMessage(ctx context.Context, msg *Message) {
 		b.handleHelp(ctx, chatID, isGroup)
 	case "/profile", "/balance":
 		b.handleProfile(ctx, chatID, userID)
-	case "/jobs":
-		if isGroup {
-			b.handleJobs(ctx, chatID, userID)
-		}
 	case "/work":
 		if isGroup {
 			b.handleWork(ctx, chatID, userID, args)
@@ -100,6 +96,18 @@ func (b *Bot) handleMessage(ctx context.Context, msg *Message) {
 		b.handleEvents(ctx, chatID)
 	case "/pay":
 		b.handlePay(ctx, chatID, userID, args)
+	case "/company":
+		b.handleCompany(ctx, chatID, userID)
+	case "/business":
+		b.handleBusiness(ctx, chatID, userID)
+	case "/stock":
+		b.handleStock(ctx, chatID, userID, args)
+	case "/trade":
+		b.handleTrade(ctx, chatID, userID, args)
+	case "/jobs":
+		if isGroup {
+			b.handleJobs(ctx, chatID, userID)
+		}
 	default:
 		b.sendMessage(chatID, "Неизвестная команда. /help")
 	}
@@ -130,6 +138,10 @@ func (b *Bot) handleHelp(ctx context.Context, chatID int64, isGroup bool) {
 				"/jobs — доступные работы\n"+
 				"/city — информация о городе\n"+
 				"/market — рынок ресурсов\n"+
+				"/business — предприятия\n"+
+				"/company — корпорация\n"+
+				"/stock — акции\n"+
+				"/trade — контракты\n"+
 				"/events — события\n"+
 				"/pay @user сумма — перевод")
 	} else {
@@ -423,6 +435,96 @@ func buildInlineKeyboard(rows [][]InlineButton) string {
 	}
 	b, _ := json.Marshal(map[string]interface{}{"inline_keyboard": keyboard})
 	return string(b)
+}
+
+func (b *Bot) handleCompany(ctx context.Context, chatID, userID int64) {
+	user, err := b.services.User.GetUserByTGID(ctx, userID)
+	if err != nil || user.CorporationID == nil {
+		b.sendMessage(chatID, "🏢 Вы не состоите в корпорации")
+		return
+	}
+	corp, err := b.services.Corp.GetCorporation(ctx, *user.CorporationID)
+	if err != nil {
+		b.sendMessage(chatID, "❌ Корпорация не найдена")
+		return
+	}
+	staff, _ := b.services.Corp.GetStaff(ctx, corp.ID)
+	price, _ := b.services.Stock.GetSharePrice(ctx, corp.ID)
+	myShares, _ := b.services.Stock.GetUserShares(ctx, user.ID, corp.ID)
+
+	text := fmt.Sprintf("🏢 %s\n\n"+
+		"💰 Баланс: %d ₽\n"+
+		"👥 Сотрудников: %d\n"+
+		"📈 Курс акции: %d ₽\n"+
+		"📊 Всего акций: %d\n"+
+		"🔑 Мои акции: %d\n"+
+		"👤 Владелец: #%d",
+		corp.Name, corp.Balance, len(staff), price, corp.TotalShares, myShares, corp.OwnerUserID)
+	b.sendMessage(chatID, text)
+}
+
+func (b *Bot) handleBusiness(ctx context.Context, chatID, userID int64) {
+	user, err := b.services.User.GetUserByTGID(ctx, userID)
+	if err != nil || user.CityID == nil {
+		b.sendMessage(chatID, "Сначала вступите в город")
+		return
+	}
+	// Show city resources as proxy for business activity
+	stock, err := b.services.Market.GetCityResources(ctx, *user.CityID)
+	if err != nil {
+		b.sendMessage(chatID, "❌ Ошибка")
+		return
+	}
+	text := "🏭 Предприятия города:\n\n"
+	for resID, qty := range stock {
+		text += fmt.Sprintf("• %s: %d ед.\n", resID, qty)
+	}
+	b.sendMessage(chatID, text)
+}
+
+func (b *Bot) handleStock(ctx context.Context, chatID, userID int64, args []string) {
+	user, err := b.services.User.GetUserByTGID(ctx, userID)
+	if err != nil {
+		b.sendMessage(chatID, "❌ Профиль не найден")
+		return
+	}
+	if user.CorporationID == nil {
+		b.sendMessage(chatID, "🏢 Вы не состоите в корпорации")
+		return
+	}
+	corp, err := b.services.Corp.GetCorporation(ctx, *user.CorporationID)
+	if err != nil {
+		b.sendMessage(chatID, "❌ Корпорация не найдена")
+		return
+	}
+	price, _ := b.services.Stock.GetSharePrice(ctx, corp.ID)
+	myShares, _ := b.services.Stock.GetUserShares(ctx, user.ID, corp.ID)
+
+	text := fmt.Sprintf("📈 Акции %s\n\n"+
+		"💰 Курс: %d ₽/акция\n"+
+		"📊 Мои акции: %d\n"+
+		"🔢 Всего: %d",
+		corp.Name, price, myShares, corp.TotalShares)
+	b.sendMessage(chatID, text)
+}
+
+func (b *Bot) handleTrade(ctx context.Context, chatID, userID int64, args []string) {
+	user, err := b.services.User.GetUserByTGID(ctx, userID)
+	if err != nil || user.CityID == nil {
+		b.sendMessage(chatID, "Сначала вступите в город")
+		return
+	}
+	contracts, err := b.services.Trade.GetCityContracts(ctx, *user.CityID)
+	if err != nil || len(contracts) == 0 {
+		b.sendMessage(chatID, "📋 Нет активных контрактов")
+		return
+	}
+	text := "📋 Торговые контракты:\n\n"
+	for _, c := range contracts {
+		text += fmt.Sprintf("• %s → %s\n  Ресурс: %s | %d ед./день | %d ₽/ед.\n\n",
+			c["from"], c["to"], c["resource"], c["qty_per_day"], c["price"])
+	}
+	b.sendMessage(chatID, text)
 }
 
 func (b *Bot) handleCallback(ctx context.Context, cb *CallbackQuery) {
