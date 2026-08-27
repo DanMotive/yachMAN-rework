@@ -1,4 +1,4 @@
--- Business type definitions (seed-loaded, 65 types)
+-- Business type definitions (seed-loaded, 63 types)
 CREATE TABLE IF NOT EXISTS business_types (
     type_id        TEXT PRIMARY KEY,
     name           TEXT NOT NULL,

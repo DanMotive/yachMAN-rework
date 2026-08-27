@@ -51,5 +51,3 @@ CREATE INDEX idx_share_orders_open ON share_orders (corporation_id, status)
 -- Foreign key: users.corporation_id -> corporations.id
 ALTER TABLE users ADD CONSTRAINT fk_users_corporation
     FOREIGN KEY (corporation_id) REFERENCES corporations(id);
-
--- Foreign key: businesses.corporation_id (already has FK via table def)
