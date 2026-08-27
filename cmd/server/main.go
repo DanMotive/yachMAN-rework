@@ -61,15 +61,15 @@ func main() {
 	tradeSvc := services.NewTradeService(pool)
 	notifSvc := services.NewNotificationService(pool)
 	paySvc := services.NewPaymentService(pool, ledger)
+	deliverySvc := services.NewNotificationDelivery(pool, cfg.BotToken)
 
 	// Start scheduler
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	scheduler := services.NewScheduler(services.SchedulerDeps{
-		Work: workSvc, Business: bizSvc, Market: marketSvc,
-		Corp: corpSvc, Trade: tradeSvc, Notif: notifSvc, Events: eventSvc,
-	})
+	defer cancel()		scheduler := services.NewScheduler(services.SchedulerDeps{
+			Work: workSvc, Business: bizSvc, Market: marketSvc,
+			Corp: corpSvc, Trade: tradeSvc, Notif: notifSvc, Events: eventSvc,
+			Delivery: deliverySvc,
+		})
 	scheduler.Start(ctx)
 
 	// Telegram bot
@@ -79,7 +79,7 @@ func main() {
 			City: citySvc, Business: bizSvc, Corp: corpSvc,
 			Stock: stockSvc, Market: marketSvc, Events: eventSvc,
 			Trade: tradeSvc, Notif: notifSvc, Payment: paySvc,
-		})
+		}, pool)
 		go b.GetUpdatesLongPolling(ctx)
 		log.Println("Telegram bot started (long polling)")
 	}

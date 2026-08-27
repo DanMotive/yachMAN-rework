@@ -12,12 +12,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"yachman/internal/services"
 )
 
 type Bot struct {
 	token   string
 	services Services
+	db      *pgxpool.Pool
 }
 
 type Services struct {
@@ -35,8 +37,8 @@ type Services struct {
 	Payment  *services.PaymentService
 }
 
-func NewBot(token string, svc Services) *Bot {
-	return &Bot{token: token, services: svc}
+func NewBot(token string, svc Services, db *pgxpool.Pool) *Bot {
+	return &Bot{token: token, services: svc, db: db}
 }
 
 // HandleUpdate processes a Telegram update (for webhook mode).
@@ -104,6 +106,8 @@ func (b *Bot) handleMessage(ctx context.Context, msg *Message) {
 		b.handleStock(ctx, chatID, userID, args)
 	case "/trade":
 		b.handleTrade(ctx, chatID, userID, args)
+	case "/vip":
+		b.handleVip(ctx, chatID, userID)
 	case "/jobs":
 		if isGroup {
 			b.handleJobs(ctx, chatID, userID)
@@ -188,8 +192,9 @@ func (b *Bot) handleJobs(ctx context.Context, chatID, userID int64) {
 		b.sendMessage(chatID, "Работы не найдены")
 		return
 	}
-	text := "🔨 Доступные работы (добыча):\n\n"
-	limit := 10
+	text := "🔨 Доступные работы:\n\n"
+	var buttons [][]InlineButton
+	limit := 8
 	if len(works) < limit {
 		limit = len(works)
 	}
@@ -198,11 +203,20 @@ func (b *Bot) handleJobs(ctx context.Context, chatID, userID int64) {
 		if user.GlobalXP < w.RequiredXP {
 			marker = "🔒"
 		}
-		text += fmt.Sprintf("%s %s [%s]\n   XP: %d | ⏱ %d мин | 💰 %d ₽ | +%d XP | +%d ед.\n\n",
-			marker, w.ID, w.Name, w.RequiredXP, w.DurationMinutes, w.Payout, w.XPReward, w.ResourceAmount)
+		text += fmt.Sprintf("%s %s\n   ⏱ %d мин | 💰 %d ₽ | +%d XP | +%d ед.\n\n",
+			marker, w.Name, w.DurationMinutes, w.Payout, w.XPReward, w.ResourceAmount)
+		if user.GlobalXP >= w.RequiredXP {
+			buttons = append(buttons, []InlineButton{{
+				Text: fmt.Sprintf("🔨 %s", w.Name),
+				Data: fmt.Sprintf("work_start:%s", w.ID),
+			}})
+		}
 	}
-	text += "/work ID — начать работу"
-	b.sendMessage(chatID, text)
+	if len(buttons) > 0 {
+		b.sendMessageWithButtons(chatID, text, buttons)
+	} else {
+		b.sendMessage(chatID, text+"\n🔒 Недостаточно XP для доступных работ")
+	}
 }
 
 func (b *Bot) handleWork(ctx context.Context, chatID, userID int64, args []string) {
@@ -241,11 +255,15 @@ func (b *Bot) handleStudy(ctx context.Context, chatID, userID int64, args []stri
 	if len(args) == 0 {
 		programs, _ := b.services.Education.ListPrograms(ctx)
 		text := "📚 Программы обучения:\n\n"
+		var buttons [][]InlineButton
 		for _, p := range programs {
-			text += fmt.Sprintf("• %s [%s] — %d ₽ (XP: %d)\n", p.ID, p.Name, p.Cost, p.RequiredXP)
+			text += fmt.Sprintf("• %s\n  %d ₽ | XP: %d\n\n", p.Name, p.Cost, p.RequiredXP)
+			buttons = append(buttons, []InlineButton{{
+				Text: fmt.Sprintf("📝 %s", p.Name),
+				Data: fmt.Sprintf("study_enroll:%s", p.ID),
+			}})
 		}
-		text += "\n/study ID — записаться\n/study ID study — пройти урок"
-		b.sendMessage(chatID, text)
+		b.sendMessageWithButtons(chatID, text, buttons)
 		return
 	}
 
@@ -527,6 +545,48 @@ func (b *Bot) handleTrade(ctx context.Context, chatID, userID int64, args []stri
 	b.sendMessage(chatID, text)
 }
 
+func (b *Bot) isUpdateProcessed(ctx context.Context, updateID int) bool {
+	if b.db == nil {
+		return false
+	}
+	var exists bool
+	_ = b.db.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM processed_updates WHERE update_id = $1)`,
+		updateID).Scan(&exists)
+	return exists
+}
+
+func (b *Bot) markUpdateProcessed(ctx context.Context, updateID int) {
+	if b.db == nil {
+		return
+	}
+	_, _ = b.db.Exec(ctx,
+		`INSERT INTO processed_updates (update_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+		updateID)
+}
+
+func (b *Bot) handleVip(ctx context.Context, chatID, userID int64) {
+	user, err := b.services.User.GetUserByTGID(ctx, userID)
+	if err != nil {
+		b.sendMessage(chatID, "❌ Профиль не найден")
+		return
+	}
+	vipText := "❌ VIP не активен"
+	if user.VipUntil != nil {
+		vipText = fmt.Sprintf("✅ VIP до %s", user.VipUntil.Format("02.01.2006"))
+	}
+	text := fmt.Sprintf("⭐ VIP Статус\n\n%s\n\n"+
+		"Тарифы:\n"+
+		"• 30 дней — 100 Stars\n"+
+		"• 90 дней — 250 Stars\n"+
+		"• 365 дней — 800 Stars\n\n"+
+		"Преимущества:\n"+
+		"• Косметика и титулы\n"+
+		"• Расширенная аналитика\n"+
+		"• Оформление профиля", vipText)
+	b.sendMessage(chatID, text)
+}
+
 func (b *Bot) handleCallback(ctx context.Context, cb *CallbackQuery) {
 	data := cb.Data
 	if strings.HasPrefix(data, "pay_confirm:") {
@@ -546,6 +606,36 @@ func (b *Bot) handleCallback(ctx context.Context, cb *CallbackQuery) {
 		}
 	} else if data == "pay_cancel" {
 		b.answerCallback(cb.ID, "❌ Перевод отменён")
+	} else if strings.HasPrefix(data, "work_start:") {
+		workID := strings.TrimPrefix(data, "work_start:")
+		user, err := b.services.User.GetUserByTGID(ctx, cb.From.ID)
+		if err != nil || user.CityID == nil {
+			b.answerCallback(cb.ID, "❌ Сначала вступите в город")
+			return
+		}
+		err = b.services.Work.StartWork(ctx, cb.From.ID, workID, *user.CityID)
+		if err != nil {
+			b.answerCallback(cb.ID, "❌ "+err.Error())
+			return
+		}
+		work, _ := b.services.Work.GetWorkDefinition(ctx, workID)
+		b.answerCallback(cb.ID, fmt.Sprintf("✅ %s начата! ⏱ %d мин", work.Name, work.DurationMinutes))
+	} else if strings.HasPrefix(data, "study_enroll:") {
+		programID := strings.TrimPrefix(data, "study_enroll:")
+		err := b.services.Education.Enroll(ctx, cb.From.ID, programID)
+		if err != nil {
+			b.answerCallback(cb.ID, "❌ "+err.Error())
+			return
+		}
+		b.answerCallback(cb.ID, "✅ Записан на курс!")
+	} else if strings.HasPrefix(data, "study_lesson:") {
+		programID := strings.TrimPrefix(data, "study_lesson:")
+		progress, err := b.services.Education.Study(ctx, cb.From.ID, programID)
+		if err != nil {
+			b.answerCallback(cb.ID, "❌ "+err.Error())
+			return
+		}
+		b.answerCallback(cb.ID, fmt.Sprintf("📖 Урок пройден! Прогресс: %d", progress))
 	} else {
 		b.answerCallback(cb.ID, "")
 	}
@@ -632,6 +722,11 @@ func (b *Bot) GetUpdatesLongPolling(ctx context.Context) {
 			continue
 		}
 		for _, update := range result.Result {
+			if b.isUpdateProcessed(ctx, update.UpdateID_) {
+				offset = update.UpdateID_ + 1
+				continue
+			}
+			b.markUpdateProcessed(ctx, update.UpdateID_)
 			b.HandleUpdate(ctx, update)
 			offset = update.UpdateID_ + 1
 		}

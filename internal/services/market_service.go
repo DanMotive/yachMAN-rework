@@ -29,7 +29,16 @@ func (s *MarketService) CalculatePrice(ctx context.Context, cityID int64, resour
 		return 0, err
 	}
 
-	supplyIndex := float64(stock) // simplified: expected_production_24h * 0.25 ≈ 0 for now
+	// Estimate expected_production_24h from businesses in this city
+	var expectedProd24h int
+	_ = s.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(bt.output_amount), 0)
+		 FROM businesses b
+		 JOIN business_types bt ON b.type_id = bt.type_id
+		 WHERE b.city_id = $1 AND bt.output_resource = $2`, cityID, resourceID).
+		Scan(&expectedProd24h)
+
+	supplyIndex := float64(stock) + float64(expectedProd24h)*0.25
 	denom := math.Max(1, float64(demand)+supplyIndex)
 	ratio := 1.0 + 0.60*(float64(demand)-supplyIndex)/denom
 	clamped := math.Max(0.50, math.Min(2.50, ratio))

@@ -14,6 +14,7 @@ type Scheduler struct {
 	trade      *TradeService
 	notif      *NotificationService
 	events     *EventService
+	delivery   *NotificationDelivery
 }
 
 type SchedulerDeps struct {
@@ -24,6 +25,7 @@ type SchedulerDeps struct {
 	Trade    *TradeService
 	Notif    *NotificationService
 	Events   *EventService
+	Delivery *NotificationDelivery
 }
 
 func NewScheduler(deps SchedulerDeps) *Scheduler {
@@ -35,6 +37,7 @@ func NewScheduler(deps SchedulerDeps) *Scheduler {
 		trade:    deps.Trade,
 		notif:    deps.Notif,
 		events:   deps.Events,
+		delivery: deps.Delivery,
 	}
 }
 
@@ -61,6 +64,11 @@ func (s *Scheduler) minuteLoop(ctx context.Context) {
 			}
 			if n, err := s.notif.DeliverPending(ctx); err == nil && n > 0 {
 				log.Printf("[scheduler] expired %d old notifications", n)
+			}
+			if s.delivery != nil {
+				if n, err := s.delivery.DeliverPendingNotifications(ctx); err == nil && n > 0 {
+					log.Printf("[scheduler] delivered %d notifications via Telegram", n)
+				}
 			}
 		}
 	}
