@@ -110,8 +110,8 @@ fi
 # ── 6. Сборка ──────────────────────────────────────────────
 cd "$APP_DIR"
 warn "Собираю бинарник..."
-/usr/local/go/bin/go mod tidy 2>/dev/null || true
-/usr/local/go/bin/go build -ldflags="-s -w" -o "$APP_NAME" ./cmd/server/
+go mod tidy 2>/dev/null || true
+go build -ldflags="-s -w" -o "$APP_NAME" ./cmd/server/
 ok "Бинарник собран: $APP_DIR/$APP_NAME"
 ls -lh "$APP_DIR/$APP_NAME"
 
