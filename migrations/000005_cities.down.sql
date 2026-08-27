@@ -1,0 +1,8 @@
+ALTER TABLE users DROP CONSTRAINT IF EXISTS fk_users_city;
+ALTER TABLE cities DROP CONSTRAINT IF EXISTS fk_cities_mayor;
+DROP TABLE IF EXISTS city_resources;
+DROP TABLE IF EXISTS city_taxes;
+DROP TABLE IF EXISTS city_projects;
+DROP TABLE IF EXISTS city_admins;
+DROP TABLE IF EXISTS city_members;
+DROP TABLE IF EXISTS cities;
