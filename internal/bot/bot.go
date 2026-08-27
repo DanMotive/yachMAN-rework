@@ -32,6 +32,7 @@ type Services struct {
 	Events   *services.EventService
 	Trade    *services.TradeService
 	Notif    *services.NotificationService
+	Payment  *services.PaymentService
 }
 
 func NewBot(token string, svc Services) *Bot {
@@ -97,6 +98,8 @@ func (b *Bot) handleMessage(ctx context.Context, msg *Message) {
 		}
 	case "/events":
 		b.handleEvents(ctx, chatID)
+	case "/pay":
+		b.handlePay(ctx, chatID, userID, args)
 	default:
 		b.sendMessage(chatID, "Неизвестная команда. /help")
 	}
@@ -324,8 +327,126 @@ func (b *Bot) handleEvents(ctx context.Context, chatID int64) {
 	b.sendMessage(chatID, text)
 }
 
+func (b *Bot) handlePay(ctx context.Context, chatID, userID int64, args []string) {
+	if len(args) < 2 {
+		b.sendMessage(chatID, "Использование: /pay @user сумма\nПример: /pay @player1 500")
+		return
+	}
+
+	target := args[0]
+	ramStr := args[1]
+
+	amount, err := strconv.Atoi(ramStr)
+	if err != nil || amount < 1 {
+		b.sendMessage(chatID, "❌ Некорректная сумма")
+		return
+	}
+
+	// Resolve target: support both @username and numeric ID
+	var targetTGID int64
+	if strings.HasPrefix(target, "@") {
+		// Try to find by reply message or forwarded message
+		// For now, require numeric ID: /pay 123456 500
+		b.sendMessage(chatID, "💡 Используйте числовой ID пользователя или ответьте на сообщение получателя командой /pay сумма")
+		return
+	} else {
+		id, err := strconv.ParseInt(target, 10, 64)
+		if err != nil {
+			b.sendMessage(chatID, "❌ Неверный ID получателя")
+			return
+		}
+		targetTGID = id
+	}
+
+	// For large amounts, show confirmation with inline buttons
+	if amount > 100000 {
+		confirmText := fmt.Sprintf("💸 Подтвердите перевод:\n\nСумма: %d ₽\nПолучатель: %d\n\n⚠️ Это действие необратимо!", amount, targetTGID)
+		b.sendMessageWithButtons(chatID, confirmText, [][]InlineButton{{
+			{Text: "✅ Подтвердить", Data: fmt.Sprintf("pay_confirm:%d:%d", targetTGID, amount)},
+			{Text: "❌ Отмена", Data: "pay_cancel"},
+		}})
+		return
+	}
+
+	// Execute transfer directly for small amounts
+	if err := b.services.Payment.Transfer(ctx, userID, targetTGID, amount); err != nil {
+		b.sendMessage(chatID, "❌ "+err.Error())
+		return
+	}
+	b.sendMessage(chatID, fmt.Sprintf("✅ Перевод выполнен: %d ₽", amount))
+}
+
+func (b *Bot) sendMessageWithButtons(chatID int64, text string, buttons [][]InlineButton) {
+	markup := buildInlineKeyboard(buttons)
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", b.token)
+	data := url.Values{
+		"chat_id":      {strconv.FormatInt(chatID, 10)},
+		"text":         {text},
+		"reply_markup": {markup},
+	}
+	resp, err := http.PostForm(apiURL, data)
+	if err != nil {
+		log.Printf("send message error: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+}
+
+func (b *Bot) editMessageWithButtons(chatID int64, messageID int, text string, buttons [][]InlineButton) {
+	markup := buildInlineKeyboard(buttons)
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/editMessageText", b.token)
+	data := url.Values{
+		"chat_id":      {strconv.FormatInt(chatID, 10)},
+		"message_id":   {strconv.Itoa(messageID)},
+		"text":         {text},
+		"reply_markup": {markup},
+	}
+	http.PostForm(apiURL, data)
+}
+
+type InlineButton struct {
+	Text string
+	Data string
+}
+
+func buildInlineKeyboard(rows [][]InlineButton) string {
+	var keyboard [][]map[string]string
+	for _, row := range rows {
+		var btns []map[string]string
+		for _, btn := range row {
+			btns = append(btns, map[string]string{
+				"text":          btn.Text,
+				"callback_data": btn.Data,
+			})
+		}
+		keyboard = append(keyboard, btns)
+	}
+	b, _ := json.Marshal(map[string]interface{}{"inline_keyboard": keyboard})
+	return string(b)
+}
+
 func (b *Bot) handleCallback(ctx context.Context, cb *CallbackQuery) {
-	b.answerCallback(cb.ID, "")
+	data := cb.Data
+	if strings.HasPrefix(data, "pay_confirm:") {
+		parts := strings.Split(data, ":")
+		if len(parts) == 3 {
+			targetID, _ := strconv.ParseInt(parts[1], 10, 64)
+			amount, _ := strconv.Atoi(parts[2])
+			fromUser, _ := b.services.User.GetUserByTGID(ctx, cb.From.ID)
+			if fromUser != nil {
+				err := b.services.Payment.Transfer(ctx, cb.From.ID, targetID, amount)
+				if err != nil {
+					b.answerCallback(cb.ID, "❌ "+err.Error())
+					return
+				}
+				b.answerCallback(cb.ID, "✅ Перевод выполнен")
+			}
+		}
+	} else if data == "pay_cancel" {
+		b.answerCallback(cb.ID, "❌ Перевод отменён")
+	} else {
+		b.answerCallback(cb.ID, "")
+	}
 }
 
 func (b *Bot) sendMessage(chatID int64, text string) {
@@ -380,6 +501,7 @@ type Chat struct {
 type CallbackQuery struct {
 	ID   string `json:"id"`
 	From *User  `json:"from"`
+	Data string `json:"data"`
 }
 
 func (b *Bot) GetUpdatesLongPolling(ctx context.Context) {

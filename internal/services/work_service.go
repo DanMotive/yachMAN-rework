@@ -235,15 +235,21 @@ func (s *WorkService) FinishExpiredWorks(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// calculateLevel returns the player's level based on canonical XP thresholds.
+// global_xp = floor(sum(all_skill_xp) / 10)
+// Thresholds: L1=0, L2=25, L3=75, L4=150, L5=275, L6=450, L7=700, L8=1000, L9=1400, L10=1900
+// After L10: +600 XP per level
 func calculateLevel(totalXP int) int {
-	if totalXP < 10 {
-		return 1
+	thresholds := []int{0, 25, 75, 150, 275, 450, 700, 1000, 1400, 1900}
+	for i := len(thresholds) - 1; i >= 0; i-- {
+		if totalXP >= thresholds[i] {
+			if i+1 < len(thresholds) {
+				return i + 1
+			}
+			// Beyond L10: +600 XP per level
+			remaining := totalXP - thresholds[i]
+			return len(thresholds) + remaining/600
+		}
 	}
-	level := 1
-	threshold := 10
-	for totalXP >= threshold {
-		level++
-		threshold += level * 10
-	}
-	return level
+	return 1
 }
