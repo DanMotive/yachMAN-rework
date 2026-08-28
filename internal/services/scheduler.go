@@ -15,6 +15,8 @@ type Scheduler struct {
 	notif      *NotificationService
 	events     *EventService
 	delivery   *NotificationDelivery
+	city       *CityService
+tstock     *StockService
 }
 
 type SchedulerDeps struct {
@@ -26,6 +28,8 @@ type SchedulerDeps struct {
 	Notif    *NotificationService
 	Events   *EventService
 	Delivery *NotificationDelivery
+	City     *CityService
+tStock     *StockService
 }
 
 func NewScheduler(deps SchedulerDeps) *Scheduler {
@@ -38,6 +42,8 @@ func NewScheduler(deps SchedulerDeps) *Scheduler {
 		notif:    deps.Notif,
 		events:   deps.Events,
 		delivery: deps.Delivery,
+		city:     deps.City,
+t		stock:   deps.Stock,
 	}
 }
 
@@ -91,6 +97,9 @@ func (s *Scheduler) hourlyLoop(ctx context.Context) {
 			}
 			_ = s.corp.PaySalaries(ctx)
 			_ = s.market.UpdateAllPrices(ctx)
+			if n, err := s.stock.ExecuteOpenOrders(ctx); err == nil && n > 0 {
+				log.Printf("[scheduler] matched stock orders for %d corps", n)
+			}
 		}
 	}
 }
@@ -105,7 +114,16 @@ func (s *Scheduler) sixHourLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			_ = s.market.UpdateAllPrices(ctx)
-			log.Println("[scheduler] 6h tick: prices updated")
+			if n, err := s.stock.ExecuteOpenOrders(ctx); err == nil && n > 0 {
+				log.Printf("[scheduler] matched stock orders for %d corps", n)
+			}
+			if n, err := s.city.RecalculateCityLevels(ctx); err == nil && n > 0 {
+				log.Printf("[scheduler] recalculated %d city levels", n)
+			}
+			if n, err := s.city.UpdateCityTurnoverDP(ctx); err == nil && n > 0 {
+				log.Printf("[scheduler] updated DP for %d cities", n)
+			}
+			log.Println("[scheduler] 6h tick: prices, levels, DP updated")
 		}
 	}
 }

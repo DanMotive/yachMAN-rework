@@ -70,7 +70,7 @@ func main() {
 	scheduler := services.NewScheduler(services.SchedulerDeps{
 			Work: workSvc, Business: bizSvc, Market: marketSvc,
 			Corp: corpSvc, Trade: tradeSvc, Notif: notifSvc, Events: eventSvc,
-			Delivery: deliverySvc,
+			Delivery: deliverySvc, City: citySvc, Stock: stockSvc,
 		})
 	scheduler.Start(ctx)
 

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -112,9 +113,50 @@ func (s *BusinessService) processOneBusiness(ctx context.Context, bizID, cityID 
 	if corpID != nil {
 		var taxRate float64
 		_ = s.pool.QueryRow(ctx, `SELECT tax_rate_corporate FROM cities WHERE id = $1`, cityID).Scan(&taxRate)
-		// Simplified: tax is on production value, not implemented fully in v1.0
+		taxAmount := int(float64(produced) * taxRate / 100.0)
+		if taxAmount > 0 {
+			_, _ = tx.Exec(ctx, `UPDATE city_resources SET stock = stock - $1 WHERE city_id = $2 AND resource_id = $3 AND stock >= $1`,
+				taxAmount, cityID, outRes)
+			_, _ = tx.Exec(ctx, `UPDATE cities SET treasury = treasury + $1 WHERE id = $2`, taxAmount, cityID)
+		}
 	}
 
 	_, _ = tx.Exec(ctx, `UPDATE businesses SET last_tick_at = NOW() WHERE id = $1`, bizID)
 	_ = tx.Commit(ctx)
+}
+
+// ListUserBusinesses returns businesses owned by a user.
+func (s *BusinessService) ListUserBusinesses(ctx context.Context, userID int64) ([]map[string]interface{}, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT b.id, b.name, bt.name as type_name, b.power_pct, b.city_id,
+		        bt.input_a_resource, bt.input_a_amount, bt.input_b_resource, bt.input_b_amount,
+		        bt.output_resource, bt.output_amount, bt.npc_staff, c.name as city_name
+		 FROM businesses b
+		 JOIN business_types bt ON b.type_id = bt.type_id
+		 LEFT JOIN cities c ON b.city_id = c.id
+		 WHERE b.owner_user_id = $1 OR b.corporation_id IN (
+		     SELECT id FROM corporations WHERE owner_user_id = $1
+		 )
+		 ORDER BY b.created_at`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []map[string]interface{}
+	for rows.Next() {
+		var id, powerPct, inAAmt, inBAmt, outAmt, npcStaff int
+		var cityID int64
+		var name, typeName, inARes, inBRes, outRes, cityName string
+		if err := rows.Scan(&id, &name, &typeName, &powerPct, &cityID,
+			&inARes, &inAAmt, &inBRes, &inBAmt, &outRes, &outAmt, &npcStaff, &cityName); err != nil {
+			continue
+		}
+		result = append(result, map[string]interface{}{
+			"id": id, "name": name, "type": typeName, "power": powerPct,
+			"city": cityName, "input_a": fmt.Sprintf("%s %d", inARes, inAAmt),
+			"input_b": fmt.Sprintf("%s %d", inBRes, inBAmt),
+			"output": fmt.Sprintf("%s %d", outRes, outAmt), "npc_staff": npcStaff,
+		})
+	}
+	return result, nil
 }

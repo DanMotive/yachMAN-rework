@@ -64,9 +64,9 @@ func (s *TradeService) ExecuteTradeContracts(ctx context.Context) (int, error) {
 			 ON CONFLICT (city_id, resource_id) DO UPDATE SET stock = city_resources.stock + $3`,
 			toID, resID, hourlyQty)
 		if payers == "from" {
-			_, _ = tx.Exec(ctx, `UPDATE cities SET balance = balance - $1 WHERE id = $2`, totalCost, fromID)
+			_, _ = tx.Exec(ctx, `UPDATE cities SET treasury = treasury - $1 WHERE id = $2 AND treasury >= $1`, totalCost, fromID)
 		} else {
-			_, _ = tx.Exec(ctx, `UPDATE cities SET balance = balance - $1 WHERE id = $2`, totalCost, toID)
+			_, _ = tx.Exec(ctx, `UPDATE cities SET treasury = treasury - $1 WHERE id = $2 AND treasury >= $1`, totalCost, toID)
 		}
 		_ = tx.Commit(ctx)
 		count++

@@ -1054,34 +1054,30 @@ func (b *Bot) showMarket(ctx context.Context, chatID, userID int64, msgID int) {
 
 func (b *Bot) showBusiness(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
-	if err != nil || user.CityID == nil {
-		b.sendOrEdit(chatID, msgID, "❌ Вы не в городе",
+	if err != nil {
+		b.sendMessage(chatID, "❌ Профиль не найден")
+		return
+	}
+
+	businesses, err := b.services.Business.ListUserBusinesses(ctx, userID)
+	if err != nil || len(businesses) == 0 {
+		b.sendOrEdit(chatID, msgID, "🏭 У вас нет предприятий\n\nПредприятия создаёт мэр города.",
 			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
 		return
 	}
 
-	stock, err := b.services.Market.GetCityResources(ctx, *user.CityID)
-	if err != nil {
-		b.sendOrEdit(chatID, msgID, "❌ Ошибка",
-			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:city_quick"}}})
-		return
-	}
-
-	text := "🏭 Ресурсы города\n\n"
-	for resID, qty := range stock {
-		text += fmt.Sprintf("📦 %s: %d ед.\n", resourceName(resID), qty)
-	}
-	if len(stock) == 0 {
-		text += "Ресурсов пока нет.\n"
+	text := "🏭 Мои предприятия:\n\n"
+	for _, biz := range businesses {
+		text += fmt.Sprintf("• %s (%s)\n  ⚡ %d%% | %s → %s\n  👷 NPC: %d\n  🏙 %s\n\n",
+			biz["name"], biz["type"], biz["power"],
+			biz["input_a"], biz["output"], biz["npc_staff"], biz["city"])
 	}
 
 	buttons := [][]InlineButton{
-		{{Text: "◀ Назад", Data: "menu:city_quick"}},
+		{{Text: "◀ Назад", Data: "menu:main"}},
 	}
 	b.sendOrEdit(chatID, msgID, text, buttons)
 }
-
-// ────────────────────────────────────────────────────────────────────────────
 // COMPANY
 // ────────────────────────────────────────────────────────────────────────────
 

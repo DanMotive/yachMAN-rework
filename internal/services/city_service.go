@@ -205,3 +205,68 @@ func (s *CityService) IsAdmin(ctx context.Context, userID int64, cityID int64) (
 		cityID, userID).Scan(&count)
 	return count > 0, err
 }
+
+// RecalculateCityLevels updates city levels based on DP thresholds.
+// Called by scheduler every 6 hours.
+func (s *CityService) RecalculateCityLevels(ctx context.Context) (int, error) {
+	type levelSpec struct {
+		name string
+		dp   int
+	}
+	levels := []levelSpec{
+		{"community", 0}, {"village", 5}, {"settlement", 15}, {"rural", 30},
+		{"urban_type", 50}, {"small_city", 80}, {"city", 120}, {"big_city", 180},
+		{"million_city", 260}, {"metropolis", 360}, {"megalopolis", 500},
+	}
+
+	rows, err := s.pool.Query(ctx, `SELECT id, development_points FROM cities`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var cityID int64
+		var dp int
+		if err := rows.Scan(&cityID, &dp); err != nil {
+			continue
+		}
+		newLevel := "community"
+		for _, l := range levels {
+			if dp >= l.dp {
+				newLevel = l.name
+			}
+		}
+		_, _ = s.pool.Exec(ctx, `UPDATE cities SET level = $1 WHERE id = $2 AND level != $1`, newLevel, cityID)
+		count++
+	}
+	return count, nil
+}
+
+// UpdateCityTurnoverDP adds DP based on taxable turnover.
+// +1 DP per 10,000₽ of city treasury inflow.
+func (s *CityService) UpdateCityTurnoverDP(ctx context.Context) (int, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, treasury FROM cities`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var cityID int64
+		var treasury int
+		if err := rows.Scan(&cityID, &treasury); err != nil {
+			continue
+		}
+		dp := treasury / 10000
+		if dp > 0 {
+			_, _ = s.pool.Exec(ctx,
+				`UPDATE cities SET development_points = development_points + $1 WHERE id = $2`, dp, cityID)
+			count++
+		}
+	}
+	return count, nil
+}
