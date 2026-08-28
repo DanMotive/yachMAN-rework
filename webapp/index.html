@@ -10,36 +10,47 @@
 <body>
     <div id="app">
         <header id="header">
-            <h1>ЯчМан</h1>
+            <div class="header-inner">
+                <h1 id="header-title">ЯчМан</h1>
+                <div id="header-subtitle" class="header-sub"></div>
+            </div>
         </header>
 
         <main id="content">
             <section id="tab-profile" class="tab active">
+                <div class="hero-card" id="hero-profile">
+                    <div class="hero-avatar" id="hero-avatar">👤</div>
+                    <div class="hero-info">
+                        <div class="hero-name" id="hero-name">Загрузка...</div>
+                        <div class="hero-level" id="hero-level"></div>
+                        <div class="hero-xp-bar" id="hero-xp-bar"></div>
+                    </div>
+                </div>
                 <div class="card">
-                    <h2>Профиль</h2>
-                    <div id="profile-info"><p class="loading">Загрузка...</p></div>
+                    <h2>Статистика</h2>
+                    <div id="profile-stats"></div>
                 </div>
                 <div class="card">
                     <h2>Навыки</h2>
-                    <div id="skills-list"><p class="loading">Загрузка...</p></div>
+                    <div id="skills-list"></div>
                 </div>
             </section>
 
             <section id="tab-map" class="tab">
                 <div class="card">
-                    <h2>Города</h2>
-                    <div id="cities-list"><p class="loading">Загрузка...</p></div>
+                    <h2>Города мира</h2>
+                    <div id="cities-list"></div>
                 </div>
             </section>
 
             <section id="tab-work" class="tab">
-                <div id="work-list"><p class="loading">Загрузка...</p></div>
+                <div id="work-list"></div>
             </section>
 
             <section id="tab-market" class="tab">
                 <div class="card">
-                    <h2>Рынок</h2>
-                    <div id="market-list"><p class="loading">Загрузка...</p></div>
+                    <h2>Рынок ресурсов</h2>
+                    <div id="market-list"></div>
                 </div>
             </section>
         </main>
@@ -47,15 +58,19 @@
         <nav id="bottom-nav">
             <button class="nav-btn active" data-tab="profile">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <span class="nav-label">Профиль</span>
             </button>
             <button class="nav-btn" data-tab="map">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+                <span class="nav-label">Города</span>
             </button>
             <button class="nav-btn" data-tab="work">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                <span class="nav-label">Работа</span>
             </button>
             <button class="nav-btn" data-tab="market">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                <span class="nav-label">Рынок</span>
             </button>
         </nav>
     </div>
