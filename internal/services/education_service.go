@@ -18,6 +18,7 @@ type EducationService struct {
 
 func NewEducationService(pool *pgxpool.Pool, ledger *LedgerService) *EducationService {
 	return &EducationService{pool: pool, ledger: ledger}
+}
 
 func (s *EducationService) resolveInternalID(ctx context.Context, tx pgx.Tx, telegramID int64) (int64, error) {
 	var id int64

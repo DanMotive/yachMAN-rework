@@ -21,6 +21,7 @@ type WorkService struct {
 
 func NewWorkService(pool *pgxpool.Pool, ledger *LedgerService, users *UserService) *WorkService {
 	return &WorkService{pool: pool, ledger: ledger, users: users}
+}
 
 func (s *WorkService) resolveInternalID(ctx context.Context, tx pgx.Tx, telegramID int64) (int64, error) {
 	var id int64

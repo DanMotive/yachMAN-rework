@@ -16,6 +16,7 @@ type PaymentService struct {
 
 func NewPaymentService(pool *pgxpool.Pool, ledger *LedgerService) *PaymentService {
 	return &PaymentService{pool: pool, ledger: ledger}
+}
 
 func (s *PaymentService) resolveInternalID(ctx context.Context, tx pgx.Tx, telegramID int64) (int64, error) {
 	var id int64
