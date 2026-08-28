@@ -1053,7 +1053,7 @@ func (b *Bot) showMarket(ctx context.Context, chatID, userID int64, msgID int) {
 // ────────────────────────────────────────────────────────────────────────────
 
 func (b *Bot) showBusiness(ctx context.Context, chatID, userID int64, msgID int) {
-	user, err := b.services.User.GetUserByTGID(ctx, userID)
+	_, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil {
 		b.sendMessage(chatID, "❌ Профиль не найден")
 		return
@@ -1138,7 +1138,7 @@ func (b *Bot) showCorpStaff(ctx context.Context, chatID, userID int64, msgID int
 	staff, _ := b.services.Corp.GetStaff(ctx, *user.CorporationID)
 	text := "👥 Штат корпорации:\n\n"
 	for _, s := range staff {
-		text += fmt.Sprintf("• #%d — %s\n", s.UserID, roleToEmoji(s.Role))
+		text += fmt.Sprintf("• #%d — %s\n", s.UserID, roleToEmoji(s.Position))
 	}
 	if len(staff) == 0 {
 		text += "Нет сотрудников\n"
@@ -1645,7 +1645,7 @@ func (b *Bot) answerCallback(callbackID, text string) {
 }
 
 // sendOrEditWithWorkBack is a convenience for work-related error messages.
-func (b *Bot) sendOrEditWithWorkBack(chatID, msgID int, text string) {
+func (b *Bot) sendOrEditWithWorkBack(chatID int64, msgID int, text string) {
 	b.sendOrEdit(chatID, msgID, text,
 		[][]InlineButton{{{Text: "◀ Назад", Data: "menu:work"}}})
 }
