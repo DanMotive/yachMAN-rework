@@ -1,34 +1,54 @@
 const API_BASE = window.location.origin;
 
-const api = {
-    async get(path) {
-        const resp = await fetch(`${API_BASE}${path}`);
-        if (!resp.ok) throw new Error(`API ${resp.status}`);
-        return resp.json();
-    },
+// Get Telegram Web App initData for auth
+function getInitData() {
+    const tg = window.Telegram?.WebApp;
+    return tg?.initData || '';
+}
 
-    async post(path, body) {
-        const resp = await fetch(`${API_BASE}${path}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        });
+const api = {
+    async get(path, requiresAuth = false) {
+        const headers = {};
+        if (requiresAuth) {
+            const initData = getInitData();
+            if (initData) headers['X-Telegram-Init-Data'] = initData;
+        }
+        const resp = await fetch(`${API_BASE}${path}`, { headers });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
-            throw new Error(err.error || `API ${resp.status}`);
+            throw new Error(err.error || `HTTP ${resp.status}`);
         }
         return resp.json();
     },
 
-    getProfile: () => api.get('/api/me'),
-    getSkills: () => api.get('/api/me/skills'),
+    async post(path, body, requiresAuth = false) {
+        const headers = { 'Content-Type': 'application/json' };
+        if (requiresAuth) {
+            const initData = getInitData();
+            if (initData) headers['X-Telegram-Init-Data'] = initData;
+        }
+        const resp = await fetch(`${API_BASE}${path}`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body)
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || `HTTP ${resp.status}`);
+        }
+        return resp.json();
+    },
+
+    // Public endpoints
     getCities: () => api.get('/api/cities'),
     getCity: (id) => api.get(`/api/cities/${id}`),
     getWorks: (dir) => api.get(`/api/works/${dir || ''}`),
     getMarket: (cityId) => api.get(`/api/resources/${cityId}`),
     getEvents: () => api.get('/api/events'),
-    startWork: (workId) => api.post('/api/work/start', { work_id: workId }),
-    getEducation: () => api.get('/api/me/education'),
-    enroll: (programId) => api.post('/api/study', { program_id: programId }),
-    study: (programId) => api.post('/api/study/lesson', { program_id: programId }),
+    getDirections: () => api.get('/api/works'),
+
+    // Protected endpoints (need Telegram init data)
+    getProfile: () => api.get('/api/me', true),
+    getSkills: () => api.get('/api/me/skills', true),
+    startWork: (workId) => api.post('/api/work/start', { work_id: workId }, true),
 };
