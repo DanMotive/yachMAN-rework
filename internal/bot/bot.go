@@ -284,6 +284,53 @@ func (b *Bot) handleCityGroup(ctx context.Context, chatID, userID int64, args []
 	}
 }
 
+func (b *Bot) showCityInfoGroup(ctx context.Context, chatID, userID int64) {
+	city, err := b.services.City.GetCityByChatID(ctx, chatID)
+	if err != nil {
+		b.sendMessage(chatID, "Город не зарегистрирован.\nАдминистратор: /city register Название")
+		return
+	}
+	players, _ := b.services.City.GetPlayerCount(ctx, city.ID)
+	isMayor := false
+	if city.MayorUserID != nil && *city.MayorUserID == userID {
+		isMayor = true
+	}
+	text := fmt.Sprintf(
+		"🏙 %s\n\n"+
+			"📊 Уровень: %s\n"+
+			"👥 Игроков: %d | NPC: %d\n"+
+			"💰 Казна: %s ₽\n"+
+			"📈 DP: %d\n"+
+			"🔒 Доступ: %s\n\n"+
+			"Налоги:\n"+
+			"  Предприятия: %.0f%%\n"+
+			"  Корпорации: %.0f%%\n"+
+			"  Подоходный: %.0f%%",
+		city.Name,
+		city.Level,
+		players, city.NPCPopulation,
+		formatMoney(city.Treasury),
+		city.DevelopmentPoints,
+		city.AccessMode,
+		city.TaxRateBusiness,
+		city.TaxRateCorporate,
+		city.TaxRateIncome,
+	)
+
+	var buttons [][]InlineButton
+	if isMayor {
+		buttons = append(buttons, []InlineButton{
+			{Text: "📈 Ресурсы", Data: "market_view"},
+			{Text: "🏭 Предприятия", Data: "biz_list"},
+		})
+	}
+	buttons = append(buttons, []InlineButton{
+		{Text: "📋 Контракты", Data: "trade_list"},
+		{Text: "🎯 События", Data: "menu:events"},
+	})
+	b.sendMessageWithButtons(chatID, text, buttons)
+}
+
 func (b *Bot) registerCity(ctx context.Context, chatID, userID int64, name string) {
 	err := b.services.City.RegisterCity(ctx, chatID, name, userID)
 	if err != nil {
@@ -979,8 +1026,6 @@ func (b *Bot) showNotifications(ctx context.Context, chatID, userID int64) {
 	for _, n := range notifs {
 		text += fmt.Sprintf("• %s: %s\n", n["title"], n["body"])
 	}
-
-	b.services.Notif.MarkRead(ctx, userID)
 
 	buttons := [][]InlineButton{
 		{{Text: "✅ Прочитать все", Data: "notif_read"}},
@@ -1704,9 +1749,10 @@ func formatMoney(n int) string {
 		return strconv.Itoa(n)
 	}
 	s := strconv.Itoa(n)
+	l := len(s)
 	result := ""
 	for i, c := range s {
-		if i > 0 && (len(s)-i)%3 == 0 {
+		if i > 0 && (l-i)%3 == 0 {
 			result += " "
 		}
 		result += string(c)
