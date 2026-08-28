@@ -15,20 +15,22 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .badge-yellow{background:#ff9800;color:#fff}
 .badge-red{background:#e53935;color:#fff}
 
+/* CSS Progress Bar */
+.progress-bar{height:6px;border-radius:3px;background:rgba(128,128,128,.2);overflow:hidden;margin-top:4px}
+.progress-fill{height:100%;border-radius:3px;background:var(--tg-theme-button-color,#3390ec);transition:width .3s}
+
 /* Direction cards */
 .dir-card{display:flex;align-items:center;padding:14px;margin:0 12px 8px;background:var(--tg-theme-secondary-bg-color,#f0f0f0);border-radius:12px;cursor:pointer;transition:background .15s}
 .dir-card:active{background:rgba(128,128,128,.2)}
 .dir-emoji{font-size:28px;margin-right:12px;flex-shrink:0}
 .dir-info{flex:1;min-width:0}
 .dir-name{font-weight:600;font-size:15px;display:block}
-.dir-xp{font-size:12px;color:var(--tg-theme-hint-color,#888);display:block;margin-top:2px;font-family:monospace}
+.dir-xp{font-size:12px;color:var(--tg-theme-hint-color,#888);display:block;margin-top:2px}
 .dir-arrow{font-size:24px;color:var(--tg-theme-hint-color,#888);flex-shrink:0}
 
-/* Direction header (back) */
 .dir-header{display:flex;align-items:center;padding:12px 16px;margin:0 12px 8px;font-weight:600;font-size:16px;cursor:pointer;color:var(--tg-theme-button-color,#3390ec)}
 .dir-back{font-size:24px;margin-right:8px}
 
-/* Work cards */
 .work-card{background:var(--tg-theme-bg-color,#fff);border-radius:10px;padding:14px;margin:0 12px 10px;border:1px solid rgba(128,128,128,.15)}
 .work-card.locked{opacity:.5}
 .work-header{margin-bottom:6px}
@@ -36,24 +38,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .work-details{display:flex;gap:12px;font-size:13px;color:var(--tg-theme-hint-color,#888);margin-bottom:4px;flex-wrap:wrap}
 .work-start-btn{width:100%;margin-top:8px}
 
-/* City cards */
 .city-card{background:var(--tg-theme-bg-color,#fff);border-radius:10px;padding:14px;margin:0 12px 10px;border:1px solid rgba(128,128,128,.15)}
 .city-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 .city-name{font-weight:600;font-size:15px}
 .city-level{font-size:12px}
 .city-stats{display:flex;gap:16px;font-size:13px;color:var(--tg-theme-hint-color,#888)}
 
-/* Resource items */
 .resource-item{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(128,128,128,.15)}
 .resource-item:last-child{border-bottom:none}
 .resource-name{font-weight:500}
 .resource-price{font-weight:700;color:var(--tg-theme-button-color,#3390ec)}
 
-/* Skills */
-.skill-item{display:flex;justify-content:space-between;padding:8px 0;font-size:14px}
-.skill-xp{color:var(--tg-theme-hint-color,#888);font-family:monospace;font-size:12px}
+.skill-item{display:flex;justify-content:space-between;padding:8px 0;font-size:14px;align-items:center}
+.skill-xp{color:var(--tg-theme-hint-color,#888);font-size:12px;min-width:60px;text-align:right}
 
-/* Toast */
 .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:12px;font-size:14px;font-weight:600;z-index:999;animation:fadeIn .2s}
 .toast-ok{background:#4caf50;color:#fff}
 .toast-err{background:#e53935;color:#fff}
@@ -61,7 +59,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 
 /* Bottom nav */
 #bottom-nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--tg-theme-secondary-bg-color,#f0f0f0);border-top:1px solid rgba(128,128,128,.2);padding:6px 0;padding-bottom:max(6px,env(safe-area-inset-bottom));z-index:100}
-.nav-btn{flex:1;background:none;border:none;font-size:24px;padding:10px;cursor:pointer;opacity:.4;transition:opacity .2s}
+.nav-btn{flex:1;background:none;border:none;padding:10px;cursor:pointer;opacity:.4;transition:opacity .2s;display:flex;align-items:center;justify-content:center}
+.nav-btn svg{width:24px;height:24px}
 .nav-btn.active{opacity:1}
 .tab{display:none}.tab.active{display:block}
 .loading{text-align:center;padding:30px;color:var(--tg-theme-hint-color,#888)}

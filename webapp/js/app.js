@@ -34,7 +34,7 @@ async function loadTab(t){
 }
 
 function haptic(t){if(tg?.HapticFeedback){t==='error'?tg.HapticFeedback.notificationOccurred('error'):tg.HapticFeedback.impactOccurred('medium');}}
-function pb(c,m,l=10){if(!m)return'░'.repeat(l);const f=Math.min(Math.floor(c/m*l),l);return'█'.repeat(f)+'░'.repeat(l-f);}
+function pb(c,m){if(!m)m=1;const pct=Math.min(Math.round(c/m*100),100);return '<div class="progress-bar"><div class="progress-fill" style="width:'+pct+'%"></div></div>';}
 
 // Profile
 async function loadProfile(){
