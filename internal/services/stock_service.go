@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -113,152 +114,199 @@ func (s *StockService) SellShares(ctx context.Context, userID, corpID int64, amo
 }
 
 // matchOrders attempts to match open buy and sell orders for a corporation.
-// Buys execute at the seller's asking price.
+// Uses FOR UPDATE SKIP LOCKED to prevent concurrent matching on the same corporation.
 func (s *StockService) matchOrders(ctx context.Context, corpID int64) {
-	// Get open sell orders (ascending price)
-	sells, err := s.pool.Query(ctx,
-		`SELECT id, user_id, price_per_share, amount, filled
-		 FROM share_orders
-		 WHERE corporation_id = $1 AND order_type = 'sell' AND status = 'open'
-		 ORDER BY price_per_share ASC, created_at ASC`, corpID)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return
 	}
-	defer sells.Close()
+	defer tx.Rollback(ctx)
 
-	for sells.Next() {
-		var sellID int64
-		var sellerID int64
-		var sellPrice, sellAmount, sellFilled int
-		if err := sells.Scan(&sellID, &sellerID, &sellPrice, &sellAmount, &sellFilled); err != nil {
+	// Lock all open orders for this corporation to prevent concurrent matching
+	rows, err := tx.Query(ctx,
+		`SELECT id, user_id, order_type, price_per_share, amount, filled
+		 FROM share_orders
+		 WHERE corporation_id = $1 AND status = 'open'
+		 ORDER BY order_type DESC, price_per_share ASC, created_at ASC
+		 FOR UPDATE SKIP LOCKED`, corpID)
+	if err != nil {
+		return
+	}
+
+	// Collect all orders into memory (small result set)
+	type order struct {
+		id, userID, price, amount, filled int64
+		isSell                             bool
+	}
+	var allOrders []order
+	for rows.Next() {
+		var o order
+		var otype string
+		if err := rows.Scan(&o.id, &o.userID, &otype, &o.price, &o.amount, &o.filled); err != nil {
 			continue
 		}
-		sellRemaining := sellAmount - sellFilled
+		o.isSell = otype == "sell"
+		allOrders = append(allOrders, o)
+	}
+	rows.Close()
+
+	if len(allOrders) == 0 {
+		return
+	}
+
+	// Separate into sells and buys
+	var sells, buys []order
+	for _, o := range allOrders {
+		if o.isSell {
+			sells = append(sells, o)
+		} else {
+			buys = append(buys, o)
+		}
+	}
+
+	// Match: for each sell order, find matching buy orders
+	for si := range sells {
+		sell := &sells[si]
+		sellRemaining := sell.amount - sell.filled
 		if sellRemaining <= 0 {
 			continue
 		}
 
-		// Find matching buy orders (descending price, price >= sell price)
-		buys, err := s.pool.Query(ctx,
-			`SELECT id, user_id, price_per_share, amount, filled
-			 FROM share_orders
-			 WHERE corporation_id = $1 AND order_type = 'buy' AND status = 'open'
-			   AND price_per_share >= $2
-			 ORDER BY price_per_share DESC, created_at ASC`, corpID, sellPrice)
-		if err != nil {
-			continue
-		}
-
-		for buys.Next() {
-			var buyID int64
-			var buyerID int64
-			var buyPrice, buyAmount, buyFilled int
-			if err := buys.Scan(&buyID, &buyerID, &buyPrice, &buyAmount, &buyFilled); err != nil {
-				continue
-			}
-			buyRemaining := buyAmount - buyFilled
+		for bi := range buys {
+			buy := &buys[bi]
+			buyRemaining := buy.amount - buy.filled
 			if buyRemaining <= 0 {
 				continue
 			}
-			if buyerID == sellerID {
+			if buy.userID == sell.userID {
 				continue
 			}
+			if buy.price < sell.price {
+				continue // buy price too low
+			}
 
-			// Execute trade at seller's price
 			matchQty := sellRemaining
 			if buyRemaining < matchQty {
 				matchQty = buyRemaining
 			}
-			matchPrice := sellPrice // execute at seller's price
-			totalCost := matchQty * matchPrice
+			matchPrice := sell.price
+			totalCost := int(matchQty) * int(matchPrice)
 
-			if err := s.executeTrade(ctx, corpID, buyerID, sellerID, matchQty, matchPrice, totalCost); err != nil {
-				log.Printf("stock trade error: %v", err)
+			if err := s.executeTradeTx(ctx, tx, corpID, buy.userID, sell.userID,
+				int(matchQty), int(matchPrice), totalCost); err != nil {
+				log.Printf("stock trade error corp#%d: %v", corpID, err)
 				continue
 			}
 
-			// Update fill amounts
-			_, _ = s.pool.Exec(ctx, `UPDATE share_orders SET filled = filled + $1 WHERE id = $2`, matchQty, sellID)
-			_, _ = s.pool.Exec(ctx, `UPDATE share_orders SET filled = filled + $1 WHERE id = $2`, matchQty, buyID)
+			// Update fill amounts within the same transaction
+			_, _ = tx.Exec(ctx, `UPDATE share_orders SET filled = filled + $1 WHERE id = $2`, matchQty, sell.id)
+			_, _ = tx.Exec(ctx, `UPDATE share_orders SET filled = filled + $1 WHERE id = $2`, matchQty, buy.id)
 
 			// Close fully filled orders
-			_, _ = s.pool.Exec(ctx,
-				`UPDATE share_orders SET status = 'filled' WHERE id = $1 AND filled >= amount`, sellID)
-			_, _ = s.pool.Exec(ctx,
-				`UPDATE share_orders SET status = 'filled' WHERE id = $1 AND filled >= amount`, buyID)
+			_, _ = tx.Exec(ctx,
+				`UPDATE share_orders SET status = 'filled' WHERE id = $1 AND filled >= amount`, sell.id)
+			_, _ = tx.Exec(ctx,
+				`UPDATE share_orders SET status = 'filled' WHERE id = $1 AND filled >= amount`, buy.id)
 
+			sell.filled += matchQty
 			sellRemaining -= matchQty
+			buy.filled += matchQty
 			if sellRemaining <= 0 {
 				break
 			}
 		}
-		buys.Close()
+	}
 
-		if sellRemaining <= 0 {
-			// Sell order fully filled
-			_, _ = s.pool.Exec(ctx,
-				`UPDATE share_orders SET status = 'filled' WHERE id = $1 AND filled >= amount`, sellID)
-		}
+	// Commit all changes atomically
+	if err := tx.Commit(ctx); err != nil {
+		log.Printf("stock matching commit error corp#%d: %v", corpID, err)
 	}
 }
 
-// executeTrade performs the atomic share + money transfer with ledger.
-func (s *StockService) executeTrade(ctx context.Context, corpID, buyerID, sellerID int64, qty, price, totalCost int) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
+// executeTradeTx performs the atomic share + money transfer within an existing transaction.
+func (s *StockService) executeTradeTx(ctx context.Context, tx pgx.Tx,
+	corpID, buyerID, sellerID int64, qty, price, totalCost int) error {
 
 	// 1. Debit buyer
 	var buyerBalance int
-	err = tx.QueryRow(ctx, `SELECT balance FROM users WHERE id = $1 FOR UPDATE`, buyerID).Scan(&buyerBalance)
+	err := tx.QueryRow(ctx, `SELECT balance FROM users WHERE id = $1 FOR UPDATE`, buyerID).Scan(&buyerBalance)
 	if err != nil {
-		return fmt.Errorf("buyer not found")
+		return fmt.Errorf("buyer not found: %w", err)
 	}
 	if buyerBalance < totalCost {
 		return fmt.Errorf("buyer insufficient funds: has %d, need %d", buyerBalance, totalCost)
 	}
-	_, _ = tx.Exec(ctx, `UPDATE users SET balance = balance - $1 WHERE id = $2`, totalCost, buyerID)
+	_, err = tx.Exec(ctx, `UPDATE users SET balance = balance - $1 WHERE id = $2`, totalCost, buyerID)
+	if err != nil {
+		return fmt.Errorf("debit buyer: %w", err)
+	}
 
 	// 2. Credit seller
-	_, _ = tx.Exec(ctx, `UPDATE users SET balance = balance + $1 WHERE id = $2`, totalCost, sellerID)
+	_, err = tx.Exec(ctx, `UPDATE users SET balance = balance + $1 WHERE id = $2`, totalCost, sellerID)
+	if err != nil {
+		return fmt.Errorf("credit seller: %w", err)
+	}
 
 	// 3. Transfer shares: seller loses, buyer gains
-	_, _ = tx.Exec(ctx,
+	_, err = tx.Exec(ctx,
 		`UPDATE shares SET amount = amount - $1 WHERE corporation_id = $2 AND user_id = $3 AND amount >= $1`,
 		qty, corpID, sellerID)
-	_, _ = tx.Exec(ctx,
+	if err != nil {
+		return fmt.Errorf("transfer shares from seller: %w", err)
+	}
+	_, err = tx.Exec(ctx,
 		`INSERT INTO shares (corporation_id, user_id, amount) VALUES ($1, $2, $3)
 		 ON CONFLICT (corporation_id, user_id) DO UPDATE SET amount = shares.amount + $3`,
 		corpID, buyerID, qty)
+	if err != nil {
+		return fmt.Errorf("transfer shares to buyer: %w", err)
+	}
 
 	// 4. Credit corporation treasury (management fee: 1% of trade value)
 	fee := totalCost / 100
 	if fee > 0 {
-		_, _ = tx.Exec(ctx, `UPDATE corporations SET balance = balance + $1 WHERE id = $2`, fee, corpID)
+		_, err = tx.Exec(ctx, `UPDATE corporations SET balance = balance + $1 WHERE id = $2`, fee, corpID)
+		if err != nil {
+			return fmt.Errorf("credit corp fee: %w", err)
+		}
 	}
 
-	// 5. Ledger entries
+	// 5. Ledger entries with actual balance_after
+	var buyerAfter, sellerAfter int
+
+	// 5. Ledger entries with actual balance_after
+	var buyerAfter, sellerAfter int
+	_ = tx.QueryRow(ctx, `SELECT balance FROM users WHERE id = $1`, buyerID).Scan(&buyerAfter)
+	_ = tx.QueryRow(ctx, `SELECT balance FROM users WHERE id = $1`, sellerID).Scan(&sellerAfter)
+
 	opID := uuid.New()
-	_, _ = tx.Exec(ctx,
+	_, err = tx.Exec(ctx,
 		`INSERT INTO ledger_entries (operation_id, entity_type, entity_id, debit, credit, balance_after, description)
-		 VALUES ($1, 'user', $2, $3, 0, 0, $4)`,
-		opID, buyerID, totalCost, fmt.Sprintf("stock buy %d shares corp#%d @ %d₽", qty, corpID, price))
+		 VALUES ($1, 'user', $2, $3, 0, $4, $5)`,
+		opID, buyerID, totalCost, buyerAfter,
+		fmt.Sprintf("stock buy %d shares corp#%d @ %d₽", qty, corpID, price))
+	if err != nil {
+		return fmt.Errorf("ledger buyer: %w", err)
+	}
 
 	opID2 := uuid.New()
-	_, _ = tx.Exec(ctx,
+	_, err = tx.Exec(ctx,
 		`INSERT INTO ledger_entries (operation_id, entity_type, entity_id, debit, credit, balance_after, description)
-		 VALUES ($1, 'user', $2, 0, $3, 0, $4)`,
-		opID2, sellerID, totalCost, fmt.Sprintf("stock sell %d shares corp#%d @ %d₽", qty, corpID, price))
+		 VALUES ($1, 'user', $2, 0, $3, $4, $5)`,
+		opID2, sellerID, totalCost, sellerAfter,
+		fmt.Sprintf("stock sell %d shares corp#%d @ %d₽", qty, corpID, price))
+	if err != nil {
+		return fmt.Errorf("ledger seller: %w", err)
+	}
 
-	return tx.Commit(ctx)
+	return nil
 }
 
 // ExecuteOpenOrders is called by scheduler to process any unmatched orders.
 func (s *StockService) ExecuteOpenOrders(ctx context.Context) (int, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT DISTINCT corporation_id FROM share_orders WHERE status = 'open'`)
+		`SELECT DISTINCT corporation_id FROM share_orders WHERE status = 'open'
+		 FOR UPDATE SKIP LOCKED`)
 	if err != nil {
 		return 0, err
 	}
