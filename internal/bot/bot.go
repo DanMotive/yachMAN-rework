@@ -596,63 +596,45 @@ func (b *Bot) showCitiesList(ctx context.Context, chatID, userID int64, msgID in
 		return
 	}
 
-	text := "🏙 Города\n\n"
-
+	// Current city info (compact)
+	text := ""
 	if user.CityID != nil {
 		city, err := b.services.City.GetCityByID(ctx, *user.CityID)
 		if err == nil {
 			players, _ := b.services.City.GetPlayerCount(ctx, city.ID)
-			text += fmt.Sprintf("📍 Текущий: %s\n   %s | 👥 %d | NPC %d | DP %d\n\n",
-				city.Name, city.Level, players, city.NPCPopulation, city.DevelopmentPoints)
-			text += "─ ─ ─ ─ ─ ─ ─ ─\n\n"
+			text = fmt.Sprintf("📍 %s — %s | 👥 %d
+
+", city.Name, city.Level, players)
 		}
 	} else {
-		text += "📍 Вы не в городе. Вступите в один из городов ниже!\n\n"
+		text = "📍 Вы не в городе
+
+"
 	}
 
-	cities, err := b.services.City.ListPublicCities(ctx)
-	if err != nil || len(cities) == 0 {
-		text += "Публичных городов пока нет.\n"
-	} else {
-		shown := 0
-		for _, c := range cities {
-			if shown >= 20 {
-				text += fmt.Sprintf("... и ещё %d городов\n", len(cities)-20)
-				break
-			}
-			players, _ := b.services.City.GetPlayerCount(ctx, c.ID)
-			marker := ""
-			if user.CityID != nil && *user.CityID == c.ID {
-				marker = " 📍"
-			}
-			text += fmt.Sprintf("🏙 %s%s\n   %s | 👥 %d | NPC %d | DP %d\n\n",
-				c.Name, marker, c.Level, players, c.NPCPopulation, c.DevelopmentPoints)
-			shown++
-		}
-	}
-
+	cities, _ := b.services.City.ListPublicCities(ctx)
 	var buttons [][]InlineButton
+
 	if user.CityID != nil {
 		buttons = append(buttons, []InlineButton{
 			{Text: "📊 Мой город", Data: "menu:city_quick"},
+			{Text: "🚪 Покинуть", Data: "city_leave"},
 		})
-		buttons = append(buttons, []InlineButton{
-			{Text: "🚪 Покинуть город", Data: "city_leave"},
-		})
-	} else if len(cities) > 0 {
-		for _, c := range cities {
-			buttons = append(buttons, []InlineButton{
-				{Text: fmt.Sprintf("➕ %s", c.Name),
-					Data: fmt.Sprintf("city_join:%d", c.ID)},
-			})
+	} else {
+		// Join buttons — max 8 to fit in keyboard
+		for i, c := range cities {
+			if i >= 8 {
+				break
+			}
+			buttons = append(buttons, []InlineButton{{
+				Text: fmt.Sprintf("➕ %s", c.Name),
+				Data: fmt.Sprintf("city_join:%d", c.ID),
+			}})
 		}
 	}
 	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:main"}})
 	b.sendOrEdit(chatID, msgID, text, buttons)
 }
-
-func (b *Bot) showCityQuick(ctx context.Context, chatID, userID int64, msgID int) {
-	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil || user.CityID == nil {
 		b.sendOrEdit(chatID, msgID, "❌ Вы не в городе",
 			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:cities"}}})
@@ -777,29 +759,29 @@ func (b *Bot) showWorkDirections(ctx context.Context, chatID, userID int64, msgI
 		return
 	}
 
-	text := "🔨 Выберите направление:\n\n"
-
 	skills, _ := b.services.User.GetSkills(ctx, user.ID)
 	skillMap := make(map[string]int)
 	for _, s := range skills {
 		skillMap[s.Direction] = s.XP
 	}
 
-	var buttons [][]InlineButton
-	for _, dir := range enums.AllSkillDirections {
-		xp := skillMap[string(dir)]
-		text += fmt.Sprintf("%s %s — %d XP\n", directionEmoji(string(dir)), dir, xp)
-		buttons = append(buttons, []InlineButton{{
-			Text: fmt.Sprintf("%s %s (%d XP)", directionEmoji(string(dir)), dir, xp),
-			Data: fmt.Sprintf("work_dir:%s", dir),
-		}})
+	// Compact 2-column button grid: no text body, just buttons
+	var rows [][]InlineButton
+	for i := 0; i < len(enums.AllSkillDirections); i += 2 {
+		var row []InlineButton
+		for j := 0; j < 2 && i+j < len(enums.AllSkillDirections); j++ {
+			dir := enums.AllSkillDirections[i+j]
+			xp := skillMap[string(dir)]
+			row = append(row, InlineButton{
+				Text: fmt.Sprintf("%s %s %d", directionEmoji(string(dir)), dir, xp),
+				Data: fmt.Sprintf("work_dir:%s", dir),
+			})
+		}
+		rows = append(rows, row)
 	}
-
-	text += "\nВыберите направление."
-	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:main"}})
-	b.sendOrEdit(chatID, msgID, text, buttons)
+	rows = append(rows, []InlineButton{{Text: "◀ Назад", Data: "menu:main"}})
+	b.sendOrEdit(chatID, msgID, "🔨 Направления работ:", rows)
 }
-
 func (b *Bot) showWorkByDirection(ctx context.Context, chatID, userID int64, direction string, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil {
@@ -918,23 +900,13 @@ func (b *Bot) showStudyMenu(ctx context.Context, chatID, userID int64, msgID int
 	}
 
 	educations, _ := b.services.Education.GetUserEducation(ctx, userID)
+	var buttons [][]InlineButton
+
+	// Active courses — compact buttons
 	hasActive := false
 	for _, e := range educations {
 		if !e.Completed {
 			hasActive = true
-			break
-		}
-	}
-
-	text := "📚 Обучение\n\n"
-	var buttons [][]InlineButton
-
-	if hasActive {
-		text += "📖 Активные курсы:\n"
-		for _, e := range educations {
-			if e.Completed {
-				continue
-			}
 			prog, _ := b.services.Education.GetProgram(ctx, e.ProgramID)
 			name := e.ProgramID
 			lessons := 0
@@ -943,24 +915,25 @@ func (b *Bot) showStudyMenu(ctx context.Context, chatID, userID int64, msgID int
 				lessons = prog.LessonCount
 			}
 			canStudy := true
-			cooldownText := ""
 			if e.NextLessonAt != nil && e.NextLessonAt.After(time.Now()) {
 				canStudy = false
-				cooldownText = fmt.Sprintf(" (через %s)", formatDuration(time.Until(*e.NextLessonAt)))
 			}
-			text += fmt.Sprintf("  📖 %s — %d/%d уроков%s\n", name, e.Progress, lessons, cooldownText)
 			if canStudy {
 				buttons = append(buttons, []InlineButton{{
-					Text: fmt.Sprintf("📖 Урок: %s", name),
+					Text: fmt.Sprintf("📖 %s (%d/%d)", name, e.Progress, lessons),
 					Data: fmt.Sprintf("study_lesson:%s", e.ProgramID),
+				}})
+			} else {
+				buttons = append(buttons, []InlineButton{{
+					Text: fmt.Sprintf("⏳ %s (%d/%d)", name, e.Progress, lessons),
+					Data: "noop",
 				}})
 			}
 		}
-		text += "\n"
 	}
 
+	// Available programs — compact buttons
 	programs, _ := b.services.Education.ListPrograms(ctx)
-	text += "📋 Доступные программы:\n"
 	for _, p := range programs {
 		enrolled := false
 		for _, e := range educations {
@@ -970,30 +943,18 @@ func (b *Bot) showStudyMenu(ctx context.Context, chatID, userID int64, msgID int
 			}
 		}
 		locked := user.GlobalXP < p.RequiredXP
-		status := "✅"
-		if locked {
-			status = "🔒"
-		} else if enrolled {
-			status = "📖"
+		if locked || enrolled {
+			continue
 		}
-		text += fmt.Sprintf("\n%s %s\n  %s ₽ | XP: %d | Уроков: %d\n",
-			status, p.Name, formatMoney(p.Cost), p.RequiredXP, p.LessonCount)
-		if !locked && !enrolled {
-			buttons = append(buttons, []InlineButton{{
-				Text: fmt.Sprintf("📝 %s", p.Name),
-				Data: fmt.Sprintf("study_enroll:%s", p.ID),
-			}})
-		}
+		buttons = append(buttons, []InlineButton{{
+			Text: fmt.Sprintf("📝 %s", p.Name),
+			Data: fmt.Sprintf("study_enroll:%s", p.ID),
+		}})
 	}
 
 	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:main"}})
-	b.sendOrEdit(chatID, msgID, text, buttons)
+	b.sendOrEdit(chatID, msgID, "📚 Обучение:", buttons)
 }
-
-// ────────────────────────────────────────────────────────────────────────────
-// NOTIFICATIONS
-// ────────────────────────────────────────────────────────────────────────────
-
 func (b *Bot) showNotifications(ctx context.Context, chatID, userID int64, msgID int) {
 	notifs, err := b.services.Notif.GetUnread(ctx, userID)
 	if err != nil || len(notifs) == 0 {
@@ -1294,32 +1255,14 @@ func (b *Bot) showVip(ctx context.Context, chatID, userID int64, msgID int) {
 // ────────────────────────────────────────────────────────────────────────────
 
 func (b *Bot) showHelp(ctx context.Context, chatID int64, msgID int) {
-	text := "❓ Справка ЯчМан\n\n" +
-		"📱 Личные команды:\n" +
-		"/profile — профиль\n" +
-		"/daily — ежедневный бонус\n" +
-		"/cities — список городов\n" +
-		"/study — обучение\n" +
-		"/notifications — уведомления\n" +
-		"/vip — информация о VIP\n\n" +
-		"🏙 Команды города (в группе):\n" +
-		"/work — начать работу\n" +
-		"/city — информация о городе\n" +
-		"/market — рынок ресурсов\n" +
-		"/business — предприятия\n" +
-		"/company — корпорация\n" +
-		"/stock — акции\n" +
-		"/trade — контракты\n" +
-		"/events — события\n" +
-		"/pay — перевод\n\n" +
-		"💡 Используйте кнопки для навигации!"
-
 	buttons := [][]InlineButton{
+		{{Text: "👤 Профиль", Data: "menu:profile"}, {Text: "💰 Бонус", Data: "menu:daily"}},
+		{{Text: "🏙 Города", Data: "menu:cities"}, {Text: "📚 Обучение", Data: "menu:study"}},
+		{{Text: "🔔 Уведомления", Data: "menu:notif"}, {Text: "⭐ VIP", Data: "menu:vip"}},
 		{{Text: "◀ Назад", Data: "menu:main"}},
 	}
-	b.sendOrEdit(chatID, msgID, text, buttons)
+	b.sendOrEdit(chatID, msgID, "❓ Навигация:", buttons)
 }
-
 func (b *Bot) showGroupHelp(ctx context.Context, chatID int64) {
 	b.sendMessage(chatID,
 		"🏗 Команды города:\n\n"+
@@ -1411,6 +1354,8 @@ func (b *Bot) handleCallback(ctx context.Context, cb *CallbackQuery) {
 	switch {
 
 	// ── Menu navigation ──────────────────────────────
+tcase data == "noop":
+		b.answerCallback(cb.ID, "")
 	case data == "menu:main":
 		// Main menu always creates a new message (clean entry point)
 		b.showMainMenu(ctx, chatID, userID, 0)
