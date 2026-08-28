@@ -13,6 +13,7 @@ import (
 
 type Handler struct {
 	services Services
+	botToken string
 }
 
 type Services struct {
@@ -24,21 +25,28 @@ type Services struct {
 	Payment *services.PaymentService
 }
 
-func NewHandler(svc Services) *Handler {
-	return &Handler{services: svc}
+func NewHandler(svc Services, botToken string) *Handler {
+	return &Handler{services: svc, botToken: botToken}
 }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Route("/api", func(r chi.Router) {
+		// Public routes (no auth)
 		r.Get("/cities", h.listCities)
 		r.Get("/cities/{id}", h.getCity)
 		r.Get("/events", h.listEvents)
 		r.Get("/resources/{cityId}", h.cityResources)
 		r.Get("/works", h.listWorks)
 		r.Get("/works/{direction}", h.worksByDirection)
-		r.Get("/me", h.getMe)
-		r.Get("/me/skills", h.getMySkills)
-		r.Post("/work/start", h.startWork)
+
+		// Protected routes (Telegram init data required)
+		r.Group(func(r chi.Router) {
+			r.Use(AuthMiddleware(h.botToken))
+			r.Get("/me", h.getMe)
+			r.Get("/me/skills", h.getMySkills)
+			r.Post("/work/start", h.startWork)
+			r.Post("/pay", h.processPay)
+		})
 	})
 }
 
@@ -49,12 +57,12 @@ func (h *Handler) listCities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type cityJSON struct {
-		ID          int64  `json:"id"`
-		Name        string `json:"name"`
-		Level       string `json:"level"`
-		NPCPop      int    `json:"npc_population"`
-		Players     int    `json:"real_players"`
-		Public      bool   `json:"public"`
+		ID      int64  `json:"id"`
+		Name    string `json:"name"`
+		Level   string `json:"level"`
+		NPCPop  int    `json:"npc_population"`
+		Players int    `json:"real_players"`
+		Public  bool   `json:"public"`
 	}
 	var result []cityJSON
 	for _, c := range cities {
@@ -111,7 +119,6 @@ func (h *Handler) cityResources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listWorks(w http.ResponseWriter, r *http.Request) {
-	// Return all directions
 	directions := []string{
 		"добыча", "лес", "топливо", "энергетика", "металлургия",
 		"строительство", "химия", "IT", "торговля", "агро",
@@ -134,14 +141,9 @@ func (h *Handler) worksByDirection(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) getMe(w http.ResponseWriter, r *http.Request) {
-	userIDStr := r.URL.Query().Get("user_id")
-	if userIDStr == "" {
-		http.Error(w, `{"error":"user_id required"}`, http.StatusBadRequest)
-		return
-	}
-	var uid int64
-	if _, err := fmt.Sscanf(userIDStr, "%d", &uid); err != nil {
-		http.Error(w, `{"error":"invalid user_id"}`, http.StatusBadRequest)
+	uid, ok := UserIDFromContext(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
 	user, err := h.services.User.GetUserByTGID(r.Context(), uid)
@@ -154,14 +156,9 @@ func (h *Handler) getMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) getMySkills(w http.ResponseWriter, r *http.Request) {
-	userIDStr := r.URL.Query().Get("user_id")
-	if userIDStr == "" {
-		http.Error(w, `{"error":"user_id required"}`, http.StatusBadRequest)
-		return
-	}
-	var uid int64
-	if _, err := fmt.Sscanf(userIDStr, "%d", &uid); err != nil {
-		http.Error(w, `{"error":"invalid user_id"}`, http.StatusBadRequest)
+	uid, ok := UserIDFromContext(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
 	skills, err := h.services.User.GetSkills(r.Context(), uid)
@@ -174,21 +171,16 @@ func (h *Handler) getMySkills(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) startWork(w http.ResponseWriter, r *http.Request) {
+	uid, ok := UserIDFromContext(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
 	var req struct {
 		WorkID string `json:"work_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
-		return
-	}
-	userIDStr := r.URL.Query().Get("user_id")
-	if userIDStr == "" {
-		http.Error(w, `{"error":"user_id required"}`, http.StatusBadRequest)
-		return
-	}
-	var uid int64
-	if _, err := fmt.Sscanf(userIDStr, "%d", &uid); err != nil {
-		http.Error(w, `{"error":"invalid user_id"}`, http.StatusBadRequest)
 		return
 	}
 	user, err := h.services.User.GetUserByTGID(r.Context(), uid)
@@ -203,4 +195,14 @@ func (h *Handler) startWork(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+}
+
+func (h *Handler) processPay(w http.ResponseWriter, r *http.Request) {
+	uid, ok := UserIDFromContext(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	_ = uid // future: use for /pay via Web App
+	http.Error(w, `{"error":"use Telegram bot for /pay"}`, http.StatusNotImplemented)
 }

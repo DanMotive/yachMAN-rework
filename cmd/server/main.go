@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"yachman/internal/bot"
 	"yachman/internal/config"
@@ -68,10 +69,10 @@ func main() {
 	defer cancel()
 
 	scheduler := services.NewScheduler(services.SchedulerDeps{
-			Work: workSvc, Business: bizSvc, Market: marketSvc,
-			Corp: corpSvc, Trade: tradeSvc, Notif: notifSvc, Events: eventSvc,
-			Delivery: deliverySvc, City: citySvc, Stock: stockSvc,
-		})
+		Work: workSvc, Business: bizSvc, Market: marketSvc,
+		Corp: corpSvc, Trade: tradeSvc, Notif: notifSvc, Events: eventSvc,
+		Delivery: deliverySvc, City: citySvc, Stock: stockSvc,
+	})
 	scheduler.Start(ctx)
 
 	// Telegram bot
@@ -92,6 +93,11 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Heartbeat("/health"))
 
+	// Rate limiter: 100 req/min per IP
+	rl := webapp.NewRateLimiter(100, time.Minute)
+	r.Use(rl.Middleware)
+	rl.Cleanup()
+
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("YachMan server is running"))
 	})
@@ -99,7 +105,7 @@ func main() {
 	wh := webapp.NewHandler(webapp.Services{
 		User: userSvc, City: citySvc, Market: marketSvc,
 		Events: eventSvc, Work: workSvc,
-	})
+	}, cfg.BotToken)
 	wh.RegisterRoutes(r)
 
 	addr := fmt.Sprintf(":%d", cfg.ServerPort)

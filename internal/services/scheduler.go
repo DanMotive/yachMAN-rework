@@ -16,7 +16,7 @@ type Scheduler struct {
 	events     *EventService
 	delivery   *NotificationDelivery
 	city       *CityService
-tstock     *StockService
+	stock     *StockService
 }
 
 type SchedulerDeps struct {
@@ -29,7 +29,7 @@ type SchedulerDeps struct {
 	Events   *EventService
 	Delivery *NotificationDelivery
 	City     *CityService
-tStock     *StockService
+	Stock     *StockService
 }
 
 func NewScheduler(deps SchedulerDeps) *Scheduler {
@@ -43,7 +43,7 @@ func NewScheduler(deps SchedulerDeps) *Scheduler {
 		events:   deps.Events,
 		delivery: deps.Delivery,
 		city:     deps.City,
-t		stock:   deps.Stock,
+			stock:   deps.Stock,
 	}
 }
 
