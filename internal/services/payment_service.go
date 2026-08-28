@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -15,9 +16,17 @@ type PaymentService struct {
 
 func NewPaymentService(pool *pgxpool.Pool, ledger *LedgerService) *PaymentService {
 	return &PaymentService{pool: pool, ledger: ledger}
+nfunc (s *PaymentService) resolveInternalID(ctx context.Context, tx pgx.Tx, telegramID int64) (int64, error) {
+	var id int64
+	err := tx.QueryRow(ctx, `SELECT id FROM users WHERE telegram_user_id = $1`, telegramID).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("пользователь не найден")
+	}
+	return id, nil
+}
 }
 
-func (s *PaymentService) Transfer(ctx context.Context, fromUserID int64, toTelegramID int64, amount int) error {
+func (s *PaymentService) Transfer(ctx context.Context, fromTGID int64, toTelegramID int64, amount int) error {
 	if amount < 1 {
 		return fmt.Errorf("минимальная сумма перевода: 1 ₽")
 	}
@@ -30,6 +39,11 @@ func (s *PaymentService) Transfer(ctx context.Context, fromUserID int64, toTeleg
 		return err
 	}
 	defer tx.Rollback(ctx)
+
+	fromUserID, err := s.resolveInternalID(ctx, tx, fromTGID)
+	if err != nil {
+		return err
+	}
 
 	// Check recipient exists
 	var toUserID int64

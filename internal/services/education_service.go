@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"yachman/internal/models"
@@ -17,6 +18,14 @@ type EducationService struct {
 
 func NewEducationService(pool *pgxpool.Pool, ledger *LedgerService) *EducationService {
 	return &EducationService{pool: pool, ledger: ledger}
+nfunc (s *EducationService) resolveInternalID(ctx context.Context, tx pgx.Tx, telegramID int64) (int64, error) {
+	var id int64
+	err := tx.QueryRow(ctx, `SELECT id FROM users WHERE telegram_user_id = $1`, telegramID).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("пользователь не найден")
+	}
+	return id, nil
+}
 }
 
 func (s *EducationService) GetProgram(ctx context.Context, programID string) (*models.EducationProgram, error) {
@@ -50,12 +59,17 @@ func (s *EducationService) ListPrograms(ctx context.Context) ([]models.Education
 	return programs, nil
 }
 
-func (s *EducationService) Enroll(ctx context.Context, userID int64, programID string) error {
+func (s *EducationService) Enroll(ctx context.Context, telegramUserID int64, programID string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+
+	userID, err := s.resolveInternalID(ctx, tx, telegramUserID)
+	if err != nil {
+		return err
+	}
 
 	var count int
 	err = tx.QueryRow(ctx,
@@ -101,7 +115,7 @@ func (s *EducationService) Enroll(ctx context.Context, userID int64, programID s
 	return tx.Commit(ctx)
 }
 
-func (s *EducationService) Study(ctx context.Context, userID int64, programID string) (int, error) {
+func (s *EducationService) Study(ctx context.Context, telegramUserID int64, programID string) (int, error) {
 	var newProgress int
 
 	tx, err := s.pool.Begin(ctx)
@@ -109,6 +123,11 @@ func (s *EducationService) Study(ctx context.Context, userID int64, programID st
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
+
+	userID, err := s.resolveInternalID(ctx, tx, telegramUserID)
+	if err != nil {
+		return 0, err
+	}
 
 	var id int64
 	var progress, lessonCount, intervalHours int
