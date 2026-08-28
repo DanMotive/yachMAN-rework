@@ -273,9 +273,6 @@ func (s *StockService) executeTradeTx(ctx context.Context, tx pgx.Tx,
 
 	// 5. Ledger entries with actual balance_after
 	var buyerAfter, sellerAfter int
-
-	// 5. Ledger entries with actual balance_after
-	var buyerAfter, sellerAfter int
 	_ = tx.QueryRow(ctx, `SELECT balance FROM users WHERE id = $1`, buyerID).Scan(&buyerAfter)
 	_ = tx.QueryRow(ctx, `SELECT balance FROM users WHERE id = $1`, sellerID).Scan(&sellerAfter)
 
