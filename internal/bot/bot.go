@@ -122,6 +122,8 @@ func (b *Bot) GetUpdatesLongPolling(ctx context.Context) {
 			Result []Update `json:"result"`
 		}
 		if err := json.Unmarshal(body, &result); err != nil {
+			log.Printf("unmarshal error: %v", err)
+			time.Sleep(2 * time.Second)
 			continue
 		}
 		for _, update := range result.Result {
@@ -446,7 +448,11 @@ func (b *Bot) showProfile(ctx context.Context, chatID, userID int64, edit bool) 
 	if user.CorporationID != nil {
 		corp, err := b.services.Corp.GetCorporation(ctx, *user.CorporationID)
 		if err == nil {
-			corpText = fmt.Sprintf("%s (%s)", corp.Name, roleToEmoji(*user.CorporationRole))
+			role := ""
+			if user.CorporationRole != nil {
+				role = roleToEmoji(*user.CorporationRole)
+			}
+			corpText = fmt.Sprintf("%s (%s)", corp.Name, role)
 		}
 	}
 
@@ -681,7 +687,12 @@ func (b *Bot) showCitiesList(ctx context.Context, chatID, userID int64) {
 	if err != nil || len(cities) == 0 {
 		text += "Публичных городов пока нет.\n"
 	} else {
+		shown := 0
 		for _, c := range cities {
+			if shown >= 20 {
+				text += fmt.Sprintf("... и ещё %d городов", len(cities)-20)
+				break
+			}
 			players, _ := b.services.City.GetPlayerCount(ctx, c.ID)
 			marker := ""
 			if user.CityID != nil && *user.CityID == c.ID {
@@ -689,6 +700,7 @@ func (b *Bot) showCitiesList(ctx context.Context, chatID, userID int64) {
 			}
 			text += fmt.Sprintf("🏙 %s%s\n   %s | 👥 %d | NPC %d | DP %d\n\n",
 				c.Name, marker, c.Level, players, c.NPCPopulation, c.DevelopmentPoints)
+			shown++
 		}
 	}
 
