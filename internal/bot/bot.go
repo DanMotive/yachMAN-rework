@@ -56,7 +56,7 @@ func NewBot(token string, svc Services, db *pgxpool.Pool) *Bot {
 // Telegram API types
 // ────────────────────────────────────────────────────────────────────────────
 
-type Update struct {
+type TGUpdate struct {
 	UpdateID_     int            `json:"update_id"`
 	Message       *TGMessage     `json:"message"`
 	CallbackQuery *CallbackQuery `json:"callback_query"`
@@ -81,17 +81,17 @@ type TGChat struct {
 }
 
 type CallbackQuery struct {
-	ID       string   `json:"id"`
-	From     *TGUser  `json:"from"`
-	Data     string   `json:"data"`
-	Message  *TGMessage `json:"message"`
+	ID      string     `json:"id"`
+	From    *TGUser    `json:"from"`
+	Data    string     `json:"data"`
+	Message *TGMessage `json:"message"`
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // Entry points
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) HandleUpdate(ctx context.Context, update Update) {
+func (b *Bot) HandleUpdate(ctx context.Context, update TGUpdate) {
 	if update.Message != nil {
 		b.handleMessage(ctx, update.Message)
 	} else if update.CallbackQuery != nil {
@@ -118,8 +118,8 @@ func (b *Bot) GetUpdatesLongPolling(ctx context.Context) {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		var result struct {
-			Ok     bool     `json:"ok"`
-			Result []Update `json:"result"`
+			Ok     bool       `json:"ok"`
+			Result []TGUpdate `json:"result"`
 		}
 		if err := json.Unmarshal(body, &result); err != nil {
 			log.Printf("unmarshal error: %v", err)
@@ -164,90 +164,88 @@ func (b *Bot) handleMessage(ctx context.Context, msg *TGMessage) {
 		if isGroup {
 			b.showGroupHelp(ctx, chatID)
 		} else {
-			b.showMainMenu(ctx, chatID, userID)
+			b.showMainMenu(ctx, chatID, userID, 0)
 		}
 	case "/help":
 		if isGroup {
 			b.showGroupHelp(ctx, chatID)
 		} else {
-			b.showMainMenu(ctx, chatID, userID)
+			b.showMainMenu(ctx, chatID, userID, 0)
 		}
 
 	// ── DM commands ──────────────────────────────────
 	case "/profile", "/balance":
-		b.showProfile(ctx, chatID, userID, false)
+		b.showProfile(ctx, chatID, userID, 0)
 	case "/daily":
-		b.showDaily(ctx, chatID, userID, false)
+		b.showDaily(ctx, chatID, userID, 0)
 	case "/cities":
 		if isGroup {
 			b.showGroupHelp(ctx, chatID)
 		} else {
-			b.showCitiesList(ctx, chatID, userID)
+			b.showCitiesList(ctx, chatID, userID, 0)
 		}
 	case "/study":
 		if isGroup {
 			b.showGroupHelp(ctx, chatID)
 		} else {
-			b.showStudyMenu(ctx, chatID, userID)
+			b.showStudyMenu(ctx, chatID, userID, 0)
 		}
 	case "/notifications":
 		if isGroup {
 			b.showGroupHelp(ctx, chatID)
 		} else {
-			b.showNotifications(ctx, chatID, userID)
+			b.showNotifications(ctx, chatID, userID, 0)
 		}
 	case "/vip":
 		if isGroup {
 			b.showGroupHelp(ctx, chatID)
 		} else {
-			b.showVip(ctx, chatID, userID, false)
+			b.showVip(ctx, chatID, userID, 0)
 		}
 
 	// ── Group commands ───────────────────────────────
 	case "/work":
 		if isGroup {
-			b.showWorkDirections(ctx, chatID, userID)
+			b.showWorkDirections(ctx, chatID, userID, 0)
 		}
 	case "/jobs":
 		if isGroup {
-			b.showWorkDirections(ctx, chatID, userID)
+			b.showWorkDirections(ctx, chatID, userID, 0)
 		} else {
-			// In DM, show active work if any
 			b.showActiveWork(ctx, chatID, userID)
 		}
 	case "/city":
 		if isGroup {
 			b.handleCityGroup(ctx, chatID, userID, args)
 		} else {
-			// In DM: if args have city ID, show city info; otherwise cities list
 			if len(args) > 0 {
-				b.showCityDetailFromID(ctx, chatID, userID, args[0])
+				b.showCityDetailFromID(ctx, chatID, userID, args[0], 0)
 			} else {
-				b.showCitiesList(ctx, chatID, userID)
+				b.showCitiesList(ctx, chatID, userID, 0)
 			}
 		}
 	case "/market":
 		if isGroup {
-			b.showMarket(ctx, chatID, userID)
+			b.showMarket(ctx, chatID, userID, 0)
 		}
 	case "/business":
 		if isGroup {
-			b.showBusiness(ctx, chatID, userID)
+			b.showBusiness(ctx, chatID, userID, 0)
 		}
 	case "/company":
 		if isGroup {
-			b.showCompany(ctx, chatID, userID)
+			b.showCompany(ctx, chatID, userID, 0)
 		}
 	case "/stock":
 		if isGroup {
-			b.showStock(ctx, chatID, userID)
+			b.showStock(ctx, chatID, userID, 0)
 		}
 	case "/trade":
 		if isGroup {
-			b.showTrade(ctx, chatID, userID)
+			b.showTrade(ctx, chatID, userID, 0)
 		}
 	case "/events":
-		b.showEvents(ctx, chatID, false)
+		b.showEvents(ctx, chatID, 0)
 	case "/pay":
 		if isGroup {
 			b.handlePayStart(ctx, chatID, userID, args)
@@ -257,7 +255,7 @@ func (b *Bot) handleMessage(ctx context.Context, msg *TGMessage) {
 		if isGroup {
 			b.showGroupHelp(ctx, chatID)
 		} else {
-			b.showMainMenu(ctx, chatID, userID)
+			b.showMainMenu(ctx, chatID, userID, 0)
 		}
 	}
 }
@@ -286,65 +284,14 @@ func (b *Bot) handleCityGroup(ctx context.Context, chatID, userID int64, args []
 	}
 }
 
-func (b *Bot) showCityInfoGroup(ctx context.Context, chatID, userID int64) {
-	city, err := b.services.City.GetCityByChatID(ctx, chatID)
-	if err != nil {
-		b.sendMessage(chatID, "Город не зарегистрирован.\nАдминистратор: /city register Название")
-		return
-	}
-	players, _ := b.services.City.GetPlayerCount(ctx, city.ID)
-	isMayor := false
-	if city.MayorUserID != nil && *city.MayorUserID == userID {
-		isMayor = true
-	}
-	text := fmt.Sprintf(
-		"🏙 %s\n\n"+
-			"📊 Уровень: %s\n"+
-			"👥 Игроков: %d | NPC: %d\n"+
-			"💰 Казна: %s ₽\n"+
-			"📈 DP: %d\n"+
-			"🔒 Доступ: %s\n\n"+
-			"Налоги:\n"+
-			"  Предприятия: %.0f%%\n"+
-			"  Корпорации: %.0f%%\n"+
-			"  Подоходный: %.0f%%",
-		city.Name,
-		city.Level,
-		players, city.NPCPopulation,
-		formatMoney(city.Treasury),
-		city.DevelopmentPoints,
-		city.AccessMode,
-		city.TaxRateBusiness,
-		city.TaxRateCorporate,
-		city.TaxRateIncome,
-	)
-
-	var buttons [][]InlineButton
-	if isMayor {
-		buttons = append(buttons, []InlineButton{
-			{Text: "📈 Ресурсы", Data: "market_view"},
-			{Text: "🏭 Предприятия", Data: "biz_list"},
-		})
-	}
-	buttons = append(buttons, []InlineButton{
-		{Text: "📋 Контракты", Data: "trade_list"},
-		{Text: "🎯 События", Data: "menu:events"},
-	})
-	b.sendMessageWithButtons(chatID, text, buttons)
-}
-
 func (b *Bot) registerCity(ctx context.Context, chatID, userID int64, name string) {
 	err := b.services.City.RegisterCity(ctx, chatID, name, userID)
 	if err != nil {
 		b.sendMessage(chatID, "❌ "+err.Error())
 		return
 	}
-	text := fmt.Sprintf("🏙 Город «%s» зарегистрирован!\n\n"+
-		"Вы — мэр. Используйте:\n"+
-		"/city — информация о городе\n"+
-		"/work — начать работу",
-		name)
-	b.sendMessage(chatID, text)
+	b.sendMessage(chatID, fmt.Sprintf(
+		"🏙 Город «%s» зарегистрирован!\n\nВы — мэр. /city — информация", name))
 }
 
 func (b *Bot) leaveCity(ctx context.Context, chatID, userID int64) {
@@ -360,7 +307,7 @@ func (b *Bot) leaveCity(ctx context.Context, chatID, userID int64) {
 // MAIN MENU (DM)
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showMainMenu(ctx context.Context, chatID, userID int64) {
+func (b *Bot) showMainMenu(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetOrCreateUser(ctx, userID)
 	if err != nil {
 		b.sendMessage(chatID, "Ошибка: "+err.Error())
@@ -410,7 +357,6 @@ func (b *Bot) showMainMenu(ctx context.Context, chatID, userID int64) {
 		},
 	}
 
-	// If in a city, show city quick actions
 	if user.CityID != nil {
 		buttons = append(buttons, []InlineButton{
 			{Text: "📊 Город", Data: "menu:city_quick"},
@@ -422,14 +368,14 @@ func (b *Bot) showMainMenu(ctx context.Context, chatID, userID int64) {
 		})
 	}
 
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // PROFILE
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showProfile(ctx context.Context, chatID, userID int64, edit bool) {
+func (b *Bot) showProfile(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil {
 		b.sendMessage(chatID, "Профиль не найден. /start")
@@ -469,7 +415,6 @@ func (b *Bot) showProfile(ctx context.Context, chatID, userID int64, edit bool) 
 		vipText = fmt.Sprintf("✅ до %s", user.VipUntil.Format("02.01.2006"))
 	}
 
-	// Top skills
 	skills, _ := b.services.User.GetSkills(ctx, user.ID)
 	skillsText := ""
 	shown := 0
@@ -511,21 +456,14 @@ func (b *Bot) showProfile(ctx context.Context, chatID, userID int64, edit bool) 
 		},
 		{{Text: "◀ Назад", Data: "menu:main"}},
 	}
-
-	if edit {
-		msgID := b.extractMessageID(ctx, chatID)
-		if msgID > 0 {
-			b.editMessageWithButtons(chatID, msgID, text, buttons)
-			return
-		}
-	}
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
-func (b *Bot) showSkills(ctx context.Context, chatID, userID int64) {
+func (b *Bot) showSkills(ctx context.Context, chatID, userID int64, msgID int) {
 	skills, err := b.services.User.GetSkills(ctx, userID)
 	if err != nil || len(skills) == 0 {
-		b.sendMessage(chatID, "📈 Нет данных о навыках")
+		b.sendOrEdit(chatID, msgID, "📈 Нет данных о навыках",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:profile"}}})
 		return
 	}
 
@@ -541,13 +479,14 @@ func (b *Bot) showSkills(ctx context.Context, chatID, userID int64) {
 	buttons := [][]InlineButton{
 		{{Text: "◀ Назад", Data: "menu:profile"}},
 	}
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
-func (b *Bot) showUserEducation(ctx context.Context, chatID, userID int64) {
+func (b *Bot) showUserEducation(ctx context.Context, chatID, userID int64, msgID int) {
 	educations, err := b.services.Education.GetUserEducation(ctx, userID)
 	if err != nil || len(educations) == 0 {
-		b.sendMessage(chatID, "🎓 Нет записей об обучении")
+		b.sendOrEdit(chatID, msgID, "🎓 Нет записей об обучении",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:profile"}}})
 		return
 	}
 
@@ -584,14 +523,14 @@ func (b *Bot) showUserEducation(ctx context.Context, chatID, userID int64) {
 		}})
 	}
 	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:profile"}})
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // DAILY BONUS
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showDaily(ctx context.Context, chatID, userID int64, edit bool) {
+func (b *Bot) showDaily(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil {
 		b.sendMessage(chatID, "❌ Профиль не найден")
@@ -604,7 +543,6 @@ func (b *Bot) showDaily(ctx context.Context, chatID, userID int64, edit bool) {
 		bonus = 600
 	}
 
-	// Check if already claimed today
 	claimed := false
 	if user.LastDailyAt != nil {
 		hoursSince := time.Since(*user.LastDailyAt).Hours()
@@ -644,22 +582,14 @@ func (b *Bot) showDaily(ctx context.Context, chatID, userID int64, edit bool) {
 			{{Text: "◀ Назад", Data: "menu:main"}},
 		}
 	}
-
-	if edit {
-		msgID := b.extractMessageID(ctx, chatID)
-		if msgID > 0 {
-			b.editMessageWithButtons(chatID, msgID, text, buttons)
-			return
-		}
-	}
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // CITIES
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showCitiesList(ctx context.Context, chatID, userID int64) {
+func (b *Bot) showCitiesList(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil {
 		b.sendMessage(chatID, "❌ Профиль не найден")
@@ -668,21 +598,18 @@ func (b *Bot) showCitiesList(ctx context.Context, chatID, userID int64) {
 
 	text := "🏙 Города\n\n"
 
-	// Current city
 	if user.CityID != nil {
 		city, err := b.services.City.GetCityByID(ctx, *user.CityID)
 		if err == nil {
 			players, _ := b.services.City.GetPlayerCount(ctx, city.ID)
-			text += fmt.Sprintf("📍 Текущий город: %s\n"+
-				"   Уровень: %s | NPC: %d | Игроков: %d | DP: %d\n\n",
-				city.Name, city.Level, city.NPCPopulation, players, city.DevelopmentPoints)
+			text += fmt.Sprintf("📍 Текущий: %s\n   %s | 👥 %d | NPC %d | DP %d\n\n",
+				city.Name, city.Level, players, city.NPCPopulation, city.DevelopmentPoints)
 			text += "─ ─ ─ ─ ─ ─ ─ ─\n\n"
 		}
 	} else {
 		text += "📍 Вы не в городе. Вступите в один из городов ниже!\n\n"
 	}
 
-	// Public cities
 	cities, err := b.services.City.ListPublicCities(ctx)
 	if err != nil || len(cities) == 0 {
 		text += "Публичных городов пока нет.\n"
@@ -690,7 +617,7 @@ func (b *Bot) showCitiesList(ctx context.Context, chatID, userID int64) {
 		shown := 0
 		for _, c := range cities {
 			if shown >= 20 {
-				text += fmt.Sprintf("... и ещё %d городов", len(cities)-20)
+				text += fmt.Sprintf("... и ещё %d городов\n", len(cities)-20)
 				break
 			}
 			players, _ := b.services.City.GetPlayerCount(ctx, c.ID)
@@ -704,7 +631,6 @@ func (b *Bot) showCitiesList(ctx context.Context, chatID, userID int64) {
 		}
 	}
 
-	// Buttons
 	var buttons [][]InlineButton
 	if user.CityID != nil {
 		buttons = append(buttons, []InlineButton{
@@ -716,28 +642,30 @@ func (b *Bot) showCitiesList(ctx context.Context, chatID, userID int64) {
 	} else if len(cities) > 0 {
 		for _, c := range cities {
 			buttons = append(buttons, []InlineButton{
-				{Text: fmt.Sprintf("➕ Вступить в %s", c.Name),
+				{Text: fmt.Sprintf("➕ %s", c.Name),
 					Data: fmt.Sprintf("city_join:%d", c.ID)},
 			})
 		}
 	}
 	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:main"}})
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
-func (b *Bot) showCityQuick(ctx context.Context, chatID, userID int64) {
+func (b *Bot) showCityQuick(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil || user.CityID == nil {
-		b.sendMessage(chatID, "❌ Вы не в городе")
+		b.sendOrEdit(chatID, msgID, "❌ Вы не в городе",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:cities"}}})
 		return
 	}
-	b.showCityInfo(ctx, chatID, *user.CityID, "menu:cities")
+	b.showCityInfo(ctx, chatID, *user.CityID, msgID, "menu:cities")
 }
 
-func (b *Bot) showCityInfo(ctx context.Context, chatID, cityID int64, backData string) {
+func (b *Bot) showCityInfo(ctx context.Context, chatID, cityID int64, msgID int, backData string) {
 	city, err := b.services.City.GetCityByID(ctx, cityID)
 	if err != nil {
-		b.sendMessage(chatID, "❌ Город не найден")
+		b.sendOrEdit(chatID, msgID, "❌ Город не найден",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
 		return
 	}
 
@@ -776,36 +704,81 @@ func (b *Bot) showCityInfo(ctx context.Context, chatID, cityID int64, backData s
 		},
 		{{Text: "◀ Назад", Data: backData}},
 	}
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
-func (b *Bot) showCityDetailFromID(ctx context.Context, chatID, userID int64, idStr string) {
+func (b *Bot) showCityDetailFromID(ctx context.Context, chatID, userID int64, idStr string, msgID int) {
 	cityID, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		b.sendMessage(chatID, "❌ Неверный ID города")
 		return
 	}
-	b.showCityInfo(ctx, chatID, cityID, "menu:cities")
+	b.showCityInfo(ctx, chatID, cityID, msgID, "menu:cities")
+}
+
+func (b *Bot) showCityInfoGroup(ctx context.Context, chatID, userID int64) {
+	city, err := b.services.City.GetCityByChatID(ctx, chatID)
+	if err != nil {
+		b.sendMessage(chatID, "Город не зарегистрирован.\nАдминистратор: /city register Название")
+		return
+	}
+	players, _ := b.services.City.GetPlayerCount(ctx, city.ID)
+	isMayor := city.MayorUserID != nil && *city.MayorUserID == userID
+
+	text := fmt.Sprintf(
+		"🏙 %s\n\n"+
+			"📊 Уровень: %s\n"+
+			"👥 Игроков: %d | NPC: %d\n"+
+			"💰 Казна: %s ₽\n"+
+			"📈 DP: %d\n"+
+			"🔒 Доступ: %s\n\n"+
+			"Налоги:\n"+
+			"  Предприятия: %.0f%%\n"+
+			"  Корпорации: %.0f%%\n"+
+			"  Подоходный: %.0f%%",
+		city.Name,
+		city.Level,
+		players, city.NPCPopulation,
+		formatMoney(city.Treasury),
+		city.DevelopmentPoints,
+		city.AccessMode,
+		city.TaxRateBusiness,
+		city.TaxRateCorporate,
+		city.TaxRateIncome,
+	)
+
+	var buttons [][]InlineButton
+	if isMayor {
+		buttons = append(buttons, []InlineButton{
+			{Text: "📈 Ресурсы", Data: "market_view"},
+			{Text: "🏭 Предприятия", Data: "biz_list"},
+		})
+	}
+	buttons = append(buttons, []InlineButton{
+		{Text: "📋 Контракты", Data: "trade_list"},
+		{Text: "🎯 События", Data: "menu:events"},
+	})
+	b.sendMessageWithButtons(chatID, text, buttons)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // WORK (2-level navigation)
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showWorkDirections(ctx context.Context, chatID, userID int64) {
+func (b *Bot) showWorkDirections(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil {
 		b.sendMessage(chatID, "❌ Профиль не найден")
 		return
 	}
 	if user.CityID == nil {
-		b.sendMessage(chatID, "❌ Сначала вступите в город: /cities")
+		b.sendOrEdit(chatID, msgID, "❌ Сначала вступите в город: /cities",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:cities"}}})
 		return
 	}
 
-	text := "🔨 Выберите направление работы:\n\n"
+	text := "🔨 Выберите направление:\n\n"
 
-	// Get user skills to show XP per direction
 	skills, _ := b.services.User.GetSkills(ctx, user.ID)
 	skillMap := make(map[string]int)
 	for _, s := range skills {
@@ -822,20 +795,18 @@ func (b *Bot) showWorkDirections(ctx context.Context, chatID, userID int64) {
 		}})
 	}
 
-	text += "\nНажмите на направление для просмотра работ."
+	text += "\nВыберите направление."
 	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:main"}})
-
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
-func (b *Bot) showWorkByDirection(ctx context.Context, chatID, userID int64, direction string) {
+func (b *Bot) showWorkByDirection(ctx context.Context, chatID, userID int64, direction string, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil {
 		b.sendMessage(chatID, "❌ Профиль не найден")
 		return
 	}
 
-	// Get XP in this direction
 	var dirXP int
 	skills, _ := b.services.User.GetSkills(ctx, user.ID)
 	for _, s := range skills {
@@ -847,7 +818,8 @@ func (b *Bot) showWorkByDirection(ctx context.Context, chatID, userID int64, dir
 
 	works, err := b.services.Work.ListWorksByDirection(ctx, direction)
 	if err != nil || len(works) == 0 {
-		b.sendMessage(chatID, "❌ Работы не найдены")
+		b.sendOrEdit(chatID, msgID, "❌ Работы не найдены",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:work"}}})
 		return
 	}
 
@@ -870,7 +842,6 @@ func (b *Bot) showWorkByDirection(ctx context.Context, chatID, userID int64, dir
 		}
 	}
 
-	// Active work indicator
 	if user.ActiveJob != nil {
 		run, workName, err2 := b.services.Work.GetActiveWork(ctx, user.ID)
 		if err2 == nil {
@@ -883,25 +854,27 @@ func (b *Bot) showWorkByDirection(ctx context.Context, chatID, userID int64, dir
 	buttons = append(buttons, []InlineButton{
 		{Text: "◀ К направлениям", Data: "menu:work"},
 	})
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 func (b *Bot) startWork(ctx context.Context, chatID, userID int64, workID string, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil || user.CityID == nil {
-		b.sendMessage(chatID, "❌ Сначала вступите в город")
+		b.sendOrEdit(chatID, msgID, "❌ Сначала вступите в город",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:cities"}}})
 		return
 	}
 
 	work, err := b.services.Work.GetWorkDefinition(ctx, workID)
 	if err != nil {
-		b.sendMessage(chatID, "❌ Работа не найдена")
+		b.sendOrEdit(chatID, msgID, "❌ Работа не найдена",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:work"}}})
 		return
 	}
 
 	err = b.services.Work.StartWork(ctx, userID, workID, *user.CityID)
 	if err != nil {
-		b.answerCallbackByMsg(chatID, msgID, "❌ "+err.Error())
+		b.sendOrEditWithWorkBack(chatID, msgID, "❌ "+err.Error())
 		return
 	}
 
@@ -917,40 +890,33 @@ func (b *Bot) startWork(ctx context.Context, chatID, userID int64, workID string
 	buttons := [][]InlineButton{
 		{{Text: "◀ К работам", Data: fmt.Sprintf("work_dir:%s", work.Direction)}},
 	}
-	b.editMessageWithButtons(chatID, msgID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 func (b *Bot) showActiveWork(ctx context.Context, chatID, userID int64) {
 	run, workName, err := b.services.Work.GetActiveWork(ctx, userID)
 	if err != nil {
-		b.sendMessage(chatID, "📭 Нет активной работы.\n\nИспользуйте /jobs для просмотра доступных работ.")
+		b.sendMessage(chatID, "📭 Нет активной работы.\n\nИспользуйте /jobs для просмотра работ.")
 		return
 	}
 
 	remaining := time.Until(run.FinishesAt)
-	text := fmt.Sprintf("🔨 Активная работа\n\n"+
-		"%s\n"+
-		"⏱ Осталось: %s\n"+
-		"⏰ Завершится: %s",
-		workName,
-		formatDuration(remaining),
-		run.FinishesAt.Format("15:04"))
-
-	b.sendMessage(chatID, text)
+	b.sendMessage(chatID, fmt.Sprintf(
+		"🔨 Активная работа\n\n%s\n⏱ Осталось: %s\n⏰ Завершится: %s",
+		workName, formatDuration(remaining), run.FinishesAt.Format("15:04")))
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // STUDY
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showStudyMenu(ctx context.Context, chatID, userID int64) {
+func (b *Bot) showStudyMenu(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil {
 		b.sendMessage(chatID, "❌ Профиль не найден")
 		return
 	}
 
-	// Check active education
 	educations, _ := b.services.Education.GetUserEducation(ctx, userID)
 	hasActive := false
 	for _, e := range educations {
@@ -993,24 +959,26 @@ func (b *Bot) showStudyMenu(ctx context.Context, chatID, userID int64) {
 		text += "\n"
 	}
 
-	// Available programs
 	programs, _ := b.services.Education.ListPrograms(ctx)
 	text += "📋 Доступные программы:\n"
 	for _, p := range programs {
-		status := "✅"
+		enrolled := false
 		for _, e := range educations {
-			if e.ProgramID == p.ID && e.Completed {
-				status = "✅"
+			if e.ProgramID == p.ID {
+				enrolled = true
 				break
 			}
 		}
 		locked := user.GlobalXP < p.RequiredXP
+		status := "✅"
 		if locked {
 			status = "🔒"
+		} else if enrolled {
+			status = "📖"
 		}
 		text += fmt.Sprintf("\n%s %s\n  %s ₽ | XP: %d | Уроков: %d\n",
 			status, p.Name, formatMoney(p.Cost), p.RequiredXP, p.LessonCount)
-		if !locked {
+		if !locked && !enrolled {
 			buttons = append(buttons, []InlineButton{{
 				Text: fmt.Sprintf("📝 %s", p.Name),
 				Data: fmt.Sprintf("study_enroll:%s", p.ID),
@@ -1019,17 +987,17 @@ func (b *Bot) showStudyMenu(ctx context.Context, chatID, userID int64) {
 	}
 
 	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:main"}})
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // NOTIFICATIONS
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showNotifications(ctx context.Context, chatID, userID int64) {
+func (b *Bot) showNotifications(ctx context.Context, chatID, userID int64, msgID int) {
 	notifs, err := b.services.Notif.GetUnread(ctx, userID)
 	if err != nil || len(notifs) == 0 {
-		b.sendMessageWithButtons(chatID, "📭 Нет новых уведомлений",
+		b.sendOrEdit(chatID, msgID, "📭 Нет новых уведомлений",
 			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
 		return
 	}
@@ -1043,33 +1011,33 @@ func (b *Bot) showNotifications(ctx context.Context, chatID, userID int64) {
 		{{Text: "✅ Прочитать все", Data: "notif_read"}},
 		{{Text: "◀ Назад", Data: "menu:main"}},
 	}
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // MARKET
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showMarket(ctx context.Context, chatID, userID int64) {
+func (b *Bot) showMarket(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil || user.CityID == nil {
-		b.sendMessage(chatID, "❌ Вы не в городе")
+		b.sendOrEdit(chatID, msgID, "❌ Вы не в городе",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
 		return
 	}
 
 	stock, err := b.services.Market.GetCityResources(ctx, *user.CityID)
 	if err != nil {
-		b.sendMessage(chatID, "❌ Ошибка загрузки рынка")
+		b.sendOrEdit(chatID, msgID, "❌ Ошибка загрузки рынка",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:city_quick"}}})
 		return
 	}
 
 	text := "📈 Рынок ресурсов\n\n"
 	for resID, qty := range stock {
-		// Calculate price
 		price, _ := b.services.Market.CalculatePrice(ctx, *user.CityID, resID)
 		text += fmt.Sprintf("• %s: %d ед. @ %d ₽\n", resourceName(resID), qty, price)
 	}
-
 	if len(stock) == 0 {
 		text += "Ресурсов пока нет.\n"
 	}
@@ -1077,23 +1045,25 @@ func (b *Bot) showMarket(ctx context.Context, chatID, userID int64) {
 	buttons := [][]InlineButton{
 		{{Text: "◀ Назад", Data: "menu:city_quick"}},
 	}
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // BUSINESS
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showBusiness(ctx context.Context, chatID, userID int64) {
+func (b *Bot) showBusiness(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil || user.CityID == nil {
-		b.sendMessage(chatID, "❌ Вы не в городе")
+		b.sendOrEdit(chatID, msgID, "❌ Вы не в городе",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
 		return
 	}
 
 	stock, err := b.services.Market.GetCityResources(ctx, *user.CityID)
 	if err != nil {
-		b.sendMessage(chatID, "❌ Ошибка")
+		b.sendOrEdit(chatID, msgID, "❌ Ошибка",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:city_quick"}}})
 		return
 	}
 
@@ -1108,23 +1078,25 @@ func (b *Bot) showBusiness(ctx context.Context, chatID, userID int64) {
 	buttons := [][]InlineButton{
 		{{Text: "◀ Назад", Data: "menu:city_quick"}},
 	}
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // COMPANY
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showCompany(ctx context.Context, chatID, userID int64) {
+func (b *Bot) showCompany(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil || user.CorporationID == nil {
-		b.sendMessage(chatID, "🏢 Вы не в корпорации")
+		b.sendOrEdit(chatID, msgID, "🏢 Вы не в корпорации",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
 		return
 	}
 
 	corp, err := b.services.Corp.GetCorporation(ctx, *user.CorporationID)
 	if err != nil {
-		b.sendMessage(chatID, "❌ Корпорация не найдена")
+		b.sendOrEdit(chatID, msgID, "❌ Корпорация не найдена",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
 		return
 	}
 
@@ -1156,13 +1128,14 @@ func (b *Bot) showCompany(ctx context.Context, chatID, userID int64) {
 		},
 		{{Text: "◀ Назад", Data: "menu:main"}},
 	}
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
-func (b *Bot) showCorpStaff(ctx context.Context, chatID, userID int64) {
+func (b *Bot) showCorpStaff(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil || user.CorporationID == nil {
-		b.sendMessage(chatID, "❌ Не в корпорации")
+		b.sendOrEdit(chatID, msgID, "❌ Не в корпорации",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
 		return
 	}
 
@@ -1178,23 +1151,25 @@ func (b *Bot) showCorpStaff(ctx context.Context, chatID, userID int64) {
 	buttons := [][]InlineButton{
 		{{Text: "◀ Назад", Data: "menu:company"}},
 	}
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // STOCK
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showStock(ctx context.Context, chatID, userID int64) {
+func (b *Bot) showStock(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil || user.CorporationID == nil {
-		b.sendMessage(chatID, "🏢 Вы не в корпорации")
+		b.sendOrEdit(chatID, msgID, "🏢 Вы не в корпорации",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
 		return
 	}
 
 	corp, err := b.services.Corp.GetCorporation(ctx, *user.CorporationID)
 	if err != nil {
-		b.sendMessage(chatID, "❌ Корпорация не найдена")
+		b.sendOrEdit(chatID, msgID, "❌ Корпорация не найдена",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
 		return
 	}
 
@@ -1224,23 +1199,24 @@ func (b *Bot) showStock(ctx context.Context, chatID, userID int64) {
 	buttons = append(buttons, []InlineButton{
 		{Text: "◀ Назад", Data: "menu:company"},
 	})
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // TRADE
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showTrade(ctx context.Context, chatID, userID int64) {
+func (b *Bot) showTrade(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil || user.CityID == nil {
-		b.sendMessage(chatID, "❌ Вы не в городе")
+		b.sendOrEdit(chatID, msgID, "❌ Вы не в городе",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
 		return
 	}
 
 	contracts, err := b.services.Trade.GetCityContracts(ctx, *user.CityID)
 	if err != nil || len(contracts) == 0 {
-		b.sendMessageWithButtons(chatID, "📋 Нет активных контрактов",
+		b.sendOrEdit(chatID, msgID, "📋 Нет активных контрактов",
 			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:city_quick"}}})
 		return
 	}
@@ -1254,55 +1230,39 @@ func (b *Bot) showTrade(ctx context.Context, chatID, userID int64) {
 	buttons := [][]InlineButton{
 		{{Text: "◀ Назад", Data: "menu:city_quick"}},
 	}
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // EVENTS
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showEvents(ctx context.Context, chatID int64, edit bool) {
+func (b *Bot) showEvents(ctx context.Context, chatID int64, msgID int) {
 	events, err := b.services.Events.GetActiveEvents(ctx)
 	if err != nil || len(events) == 0 {
-		text := "📭 Нет активных событий"
-		buttons := [][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}}
-		if edit {
-			msgID := b.extractMessageID(ctx, chatID)
-			if msgID > 0 {
-				b.editMessageWithButtons(chatID, msgID, text, buttons)
-				return
-			}
-		}
-		b.sendMessageWithButtons(chatID, text, buttons)
+		b.sendOrEdit(chatID, msgID, "📭 Нет активных событий",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
 		return
 	}
 
 	text := "🎯 Активные события:\n\n"
 	for _, e := range events {
-		emoji := eventEmoji(e.Type)
 		remaining := time.Until(e.EndAt)
 		text += fmt.Sprintf("%s [%s] %s\n   %s\n   ⏰ Осталось: %s\n\n",
-			emoji, e.Type, e.Name, e.Description, formatDuration(remaining))
+			eventEmoji(e.Type), e.Type, e.Name, e.Description, formatDuration(remaining))
 	}
 
 	buttons := [][]InlineButton{
 		{{Text: "◀ Назад", Data: "menu:main"}},
 	}
-	if edit {
-		msgID := b.extractMessageID(ctx, chatID)
-		if msgID > 0 {
-			b.editMessageWithButtons(chatID, msgID, text, buttons)
-			return
-		}
-	}
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // VIP
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showVip(ctx context.Context, chatID, userID int64, edit bool) {
+func (b *Bot) showVip(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil {
 		b.sendMessage(chatID, "❌ Профиль не найден")
@@ -1330,21 +1290,14 @@ func (b *Bot) showVip(ctx context.Context, chatID, userID int64, edit bool) {
 	buttons := [][]InlineButton{
 		{{Text: "◀ Назад", Data: "menu:main"}},
 	}
-	if edit {
-		msgID := b.extractMessageID(ctx, chatID)
-		if msgID > 0 {
-			b.editMessageWithButtons(chatID, msgID, text, buttons)
-			return
-		}
-	}
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // HELP
 // ────────────────────────────────────────────────────────────────────────────
 
-func (b *Bot) showHelp(ctx context.Context, chatID int64, edit bool) {
+func (b *Bot) showHelp(ctx context.Context, chatID int64, msgID int) {
 	text := "❓ Справка ЯчМан\n\n" +
 		"📱 Личные команды:\n" +
 		"/profile — профиль\n" +
@@ -1363,19 +1316,12 @@ func (b *Bot) showHelp(ctx context.Context, chatID int64, edit bool) {
 		"/trade — контракты\n" +
 		"/events — события\n" +
 		"/pay — перевод\n\n" +
-		"💡 Совет: используйте кнопки для навигации!"
+		"💡 Используйте кнопки для навигации!"
 
 	buttons := [][]InlineButton{
 		{{Text: "◀ Назад", Data: "menu:main"}},
 	}
-	if edit {
-		msgID := b.extractMessageID(ctx, chatID)
-		if msgID > 0 {
-			b.editMessageWithButtons(chatID, msgID, text, buttons)
-			return
-		}
-	}
-	b.sendMessageWithButtons(chatID, text, buttons)
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
 
 func (b *Bot) showGroupHelp(ctx context.Context, chatID int64) {
@@ -1401,10 +1347,7 @@ func (b *Bot) showGroupHelp(ctx context.Context, chatID int64) {
 func (b *Bot) handlePayStart(ctx context.Context, chatID, userID int64, args []string) {
 	if len(args) < 2 {
 		b.sendMessage(chatID,
-			"💸 Перевод\n\n"+
-				"Использование:\n"+
-				"/pay @user сумма\n"+
-				"/pay 123456 500")
+			"💸 Перевод\n\nИспользование:\n/pay @user сумма\n/pay 123456 500")
 		return
 	}
 
@@ -1421,12 +1364,10 @@ func (b *Bot) handlePayStart(ctx context.Context, chatID, userID int64, args []s
 		return
 	}
 
-	// Resolve target
 	var targetTGID int64
 	if strings.HasPrefix(target, "@") {
 		b.sendMessage(chatID,
-			"💡 Введите числовой ID получателя\n"+
-				"Или ответьте на сообщение получателя: /pay сумма")
+			"💡 Введите числовой ID получателя\nИли ответьте на сообщение: /pay сумма")
 		return
 	}
 	id, err := strconv.ParseInt(target, 10, 64)
@@ -1436,13 +1377,9 @@ func (b *Bot) handlePayStart(ctx context.Context, chatID, userID int64, args []s
 	}
 	targetTGID = id
 
-	// Large amounts need confirmation
 	if amount > 100000 {
 		text := fmt.Sprintf(
-			"💸 Подтвердите перевод\n\n"+
-				"Получатель: %d\n"+
-				"Сумма: %s ₽\n\n"+
-				"⚠️ Это действие необратимо!",
+			"💸 Подтвердите перевод\n\nПолучатель: %d\nСумма: %s ₽\n\n⚠️ Это действие необратимо!",
 			targetTGID, formatMoney(amount))
 		buttons := [][]InlineButton{
 			{
@@ -1454,12 +1391,11 @@ func (b *Bot) handlePayStart(ctx context.Context, chatID, userID int64, args []s
 		return
 	}
 
-	// Execute directly
 	if err := b.services.Payment.Transfer(ctx, userID, targetTGID, amount); err != nil {
 		b.sendMessage(chatID, "❌ "+err.Error())
 		return
 	}
-	b.sendMessage(chatID, fmt.Sprintf("✅ Перевод выполнен: %s ₽ → %d", formatMoney(amount), targetTGID))
+	b.sendMessage(chatID, fmt.Sprintf("✅ Перевод: %s ₽ → %d", formatMoney(amount), targetTGID))
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1476,54 +1412,44 @@ func (b *Bot) handleCallback(ctx context.Context, cb *CallbackQuery) {
 		msgID = cb.Message.MessageID
 	}
 
-	// ── Menu navigation ──────────────────────────────
 	switch {
+
+	// ── Menu navigation ──────────────────────────────
 	case data == "menu:main":
-		b.showMainMenu(ctx, chatID, userID)
+		// Main menu always creates a new message (clean entry point)
+		b.showMainMenu(ctx, chatID, userID, 0)
 
 	case data == "menu:profile":
-		b.showProfile(ctx, chatID, userID, true)
-
+		b.showProfile(ctx, chatID, userID, msgID)
 	case data == "menu:skills":
-		b.showSkills(ctx, chatID, userID)
-
+		b.showSkills(ctx, chatID, userID, msgID)
 	case data == "menu:edu":
-		b.showUserEducation(ctx, chatID, userID)
-
+		b.showUserEducation(ctx, chatID, userID, msgID)
 	case data == "menu:daily":
-		b.showDaily(ctx, chatID, userID, true)
-
+		b.showDaily(ctx, chatID, userID, msgID)
 	case data == "menu:cities":
-		b.showCitiesList(ctx, chatID, userID)
-
+		b.showCitiesList(ctx, chatID, userID, msgID)
 	case data == "menu:city_quick":
-		b.showCityQuick(ctx, chatID, userID)
-
+		b.showCityQuick(ctx, chatID, userID, msgID)
 	case data == "menu:study":
-		b.showStudyMenu(ctx, chatID, userID)
-
+		b.showStudyMenu(ctx, chatID, userID, msgID)
 	case data == "menu:notif":
-		b.showNotifications(ctx, chatID, userID)
-
+		b.showNotifications(ctx, chatID, userID, msgID)
 	case data == "menu:vip":
-		b.showVip(ctx, chatID, userID, true)
-
+		b.showVip(ctx, chatID, userID, msgID)
 	case data == "menu:help":
-		b.showHelp(ctx, chatID, true)
-
+		b.showHelp(ctx, chatID, msgID)
 	case data == "menu:events":
-		b.showEvents(ctx, chatID, true)
-
+		b.showEvents(ctx, chatID, msgID)
 	case data == "menu:work":
-		b.showWorkDirections(ctx, chatID, userID)
-
+		b.showWorkDirections(ctx, chatID, userID, msgID)
 	case data == "menu:company":
-		b.showCompany(ctx, chatID, userID)
+		b.showCompany(ctx, chatID, userID, msgID)
 
 	// ── Work ─────────────────────────────────────────
 	case strings.HasPrefix(data, "work_dir:"):
 		dir := strings.TrimPrefix(data, "work_dir:")
-		b.showWorkByDirection(ctx, chatID, userID, dir)
+		b.showWorkByDirection(ctx, chatID, userID, dir, msgID)
 
 	case strings.HasPrefix(data, "work_go:"):
 		workID := strings.TrimPrefix(data, "work_go:")
@@ -1537,57 +1463,48 @@ func (b *Bot) handleCallback(ctx context.Context, cb *CallbackQuery) {
 			return
 		}
 		b.answerCallback(cb.ID, fmt.Sprintf("💰 +%d ₽", bonus))
-		b.showDaily(ctx, chatID, userID, true)
+		b.showDaily(ctx, chatID, userID, msgID)
 
 	// ── City ─────────────────────────────────────────
 	case strings.HasPrefix(data, "city_join:"):
 		cityIDStr := strings.TrimPrefix(data, "city_join:")
 		cityID, _ := strconv.ParseInt(cityIDStr, 10, 64)
-		err := b.services.City.JoinCity(ctx, userID, cityID)
-		if err != nil {
+		if err := b.services.City.JoinCity(ctx, userID, cityID); err != nil {
 			b.answerCallback(cb.ID, "❌ "+err.Error())
 			return
 		}
 		b.answerCallback(cb.ID, "✅ Добро пожаловать!")
-		b.showCitiesList(ctx, chatID, userID)
+		b.showCitiesList(ctx, chatID, userID, msgID)
 
 	case data == "city_leave":
-		err := b.services.City.LeaveCity(ctx, userID)
-		if err != nil {
+		if err := b.services.City.LeaveCity(ctx, userID); err != nil {
 			b.answerCallback(cb.ID, "❌ "+err.Error())
 			return
 		}
 		b.answerCallback(cb.ID, "👋 Город покинут")
-		b.showCitiesList(ctx, chatID, userID)
+		b.showCitiesList(ctx, chatID, userID, msgID)
 
-	// ── Market ───────────────────────────────────────
+	// ── Sub-screens (no state change, just navigation)
 	case data == "market_view":
-		b.showMarket(ctx, chatID, userID)
-
-	// ── Business ─────────────────────────────────────
+		b.showMarket(ctx, chatID, userID, msgID)
 	case data == "biz_list":
-		b.showBusiness(ctx, chatID, userID)
-
-	// ── Company ──────────────────────────────────────
+		b.showBusiness(ctx, chatID, userID, msgID)
 	case data == "corp_staff":
-		b.showCorpStaff(ctx, chatID, userID)
-
-	// ── Stock ────────────────────────────────────────
+		b.showCorpStaff(ctx, chatID, userID, msgID)
 	case data == "stock_view":
-		b.showStock(ctx, chatID, userID)
+		b.showStock(ctx, chatID, userID, msgID)
+	case data == "trade_list":
+		b.showTrade(ctx, chatID, userID, msgID)
 
+	// ── Stock buy/sell placeholder ───────────────────
 	case data == "stock_buy" || data == "stock_sell":
 		b.answerCallback(cb.ID, "💡 Используйте /stock buy количество")
-
-	// ── Trade ────────────────────────────────────────
-	case data == "trade_list":
-		b.showTrade(ctx, chatID, userID)
 
 	// ── Notifications ────────────────────────────────
 	case data == "notif_read":
 		b.services.Notif.MarkRead(ctx, userID)
 		b.answerCallback(cb.ID, "✅ Все прочитано")
-		b.showNotifications(ctx, chatID, userID)
+		b.showNotifications(ctx, chatID, userID, msgID)
 
 	// ── Pay ──────────────────────────────────────────
 	case strings.HasPrefix(data, "pay_yes:"):
@@ -1595,14 +1512,13 @@ func (b *Bot) handleCallback(ctx context.Context, cb *CallbackQuery) {
 		if len(parts) == 3 {
 			targetID, _ := strconv.ParseInt(parts[1], 10, 64)
 			amount, _ := strconv.Atoi(parts[2])
-			err := b.services.Payment.Transfer(ctx, cb.From.ID, targetID, amount)
-			if err != nil {
+			if err := b.services.Payment.Transfer(ctx, cb.From.ID, targetID, amount); err != nil {
 				b.answerCallback(cb.ID, "❌ "+err.Error())
 				return
 			}
 			b.answerCallback(cb.ID, "✅ Перевод выполнен!")
 			if msgID > 0 {
-				b.editMessage(chatID, msgID, fmt.Sprintf("✅ Перевод %s ₽ выполнен → %d", formatMoney(amount), targetID))
+				b.editMessage(chatID, msgID, fmt.Sprintf("✅ Перевод %s ₽ → %d", formatMoney(amount), targetID))
 			}
 		}
 
@@ -1615,13 +1531,12 @@ func (b *Bot) handleCallback(ctx context.Context, cb *CallbackQuery) {
 	// ── Study ────────────────────────────────────────
 	case strings.HasPrefix(data, "study_enroll:"):
 		progID := strings.TrimPrefix(data, "study_enroll:")
-		err := b.services.Education.Enroll(ctx, userID, progID)
-		if err != nil {
+		if err := b.services.Education.Enroll(ctx, userID, progID); err != nil {
 			b.answerCallback(cb.ID, "❌ "+err.Error())
 			return
 		}
 		b.answerCallback(cb.ID, "✅ Записан!")
-		b.showStudyMenu(ctx, chatID, userID)
+		b.showStudyMenu(ctx, chatID, userID, msgID)
 
 	case strings.HasPrefix(data, "study_lesson:"):
 		progID := strings.TrimPrefix(data, "study_lesson:")
@@ -1631,7 +1546,7 @@ func (b *Bot) handleCallback(ctx context.Context, cb *CallbackQuery) {
 			return
 		}
 		b.answerCallback(cb.ID, fmt.Sprintf("📖 Урок пройден! %d", progress))
-		b.showStudyMenu(ctx, chatID, userID)
+		b.showStudyMenu(ctx, chatID, userID, msgID)
 
 	default:
 		b.answerCallback(cb.ID, "")
@@ -1642,76 +1557,101 @@ func (b *Bot) handleCallback(ctx context.Context, cb *CallbackQuery) {
 // Telegram API helpers
 // ────────────────────────────────────────────────────────────────────────────
 
+// apiResponse is used to parse Telegram API responses.
+type apiResponse struct {
+	OK     bool `json:"ok"`
+	Result struct {
+		MessageID int `json:"message_id"`
+	} `json:"result"`
+}
+
+func (b *Bot) apiPost(method string, data url.Values) apiURLResult {
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/%s", b.token, method)
+	resp, err := http.PostForm(apiURL, data)
+	if err != nil {
+		log.Printf("API %s error: %v", method, err)
+		return apiURLResult{}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var r apiResponse
+	json.Unmarshal(body, &r)
+	return apiURLResult{OK: r.OK, MessageID: r.Result.MessageID}
+}
+
+type apiURLResult struct {
+	OK        bool
+	MessageID int
+}
+
 func (b *Bot) sendMessage(chatID int64, text string) {
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", b.token)
 	data := url.Values{
 		"chat_id": {strconv.FormatInt(chatID, 10)},
 		"text":    {text},
 	}
-	resp, err := http.PostForm(apiURL, data)
-	if err != nil {
-		log.Printf("sendMessage error: %v", err)
-		return
-	}
-	resp.Body.Close()
+	b.apiPost("sendMessage", data)
 }
 
-func (b *Bot) sendMessageWithButtons(chatID int64, text string, buttons [][]InlineButton) {
+// sendMessageWithButtons sends a message and returns the Telegram message_id.
+func (b *Bot) sendMessageWithButtons(chatID int64, text string, buttons [][]InlineButton) int {
 	markup := buildInlineKeyboard(buttons)
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", b.token)
 	data := url.Values{
 		"chat_id":      {strconv.FormatInt(chatID, 10)},
 		"text":         {text},
 		"reply_markup": {markup},
 	}
-	resp, err := http.PostForm(apiURL, data)
-	if err != nil {
-		log.Printf("sendMessageWithButtons error: %v", err)
-		return
-	}
-	resp.Body.Close()
+	r := b.apiPost("sendMessage", data)
+	return r.MessageID
 }
 
-func (b *Bot) editMessageWithButtons(chatID int64, messageID int, text string, buttons [][]InlineButton) {
+// editMessageWithButtons edits an existing message. Returns true on success.
+func (b *Bot) editMessageWithButtons(chatID int64, messageID int, text string, buttons [][]InlineButton) bool {
 	markup := buildInlineKeyboard(buttons)
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/editMessageText", b.token)
 	data := url.Values{
 		"chat_id":      {strconv.FormatInt(chatID, 10)},
 		"message_id":   {strconv.Itoa(messageID)},
 		"text":         {text},
 		"reply_markup": {markup},
 	}
-	http.PostForm(apiURL, data)
+	r := b.apiPost("editMessageText", data)
+	return r.OK
 }
 
+// editMessage edits text without buttons.
 func (b *Bot) editMessage(chatID int64, messageID int, text string) {
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/editMessageText", b.token)
 	data := url.Values{
 		"chat_id":    {strconv.FormatInt(chatID, 10)},
 		"message_id": {strconv.Itoa(messageID)},
 		"text":       {text},
 	}
-	http.PostForm(apiURL, data)
+	b.apiPost("editMessageText", data)
+}
+
+// sendOrEdit is the core navigation helper:
+//   - if msgID > 0: try to edit the existing message
+//   - if msgID == 0 or edit fails: send a new message
+func (b *Bot) sendOrEdit(chatID int64, msgID int, text string, buttons [][]InlineButton) {
+	if msgID > 0 {
+		if b.editMessageWithButtons(chatID, msgID, text, buttons) {
+			return
+		}
+		// Edit failed (message deleted, text unchanged, etc.) — send new
+	}
+	b.sendMessageWithButtons(chatID, text, buttons)
 }
 
 func (b *Bot) answerCallback(callbackID, text string) {
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/answerCallbackQuery", b.token)
 	data := url.Values{
 		"callback_query_id": {callbackID},
 		"text":              {text},
 	}
-	http.PostForm(apiURL, data)
+	b.apiPost("answerCallbackQuery", data)
 }
 
-func (b *Bot) answerCallbackByMsg(chatID int64, msgID int, text string) {
-	// Send as a new message since we can't answer callback without ID
-	b.sendMessage(chatID, text)
-}
-
-func (b *Bot) extractMessageID(ctx context.Context, chatID int64) int {
-	// We can't reliably extract the last message ID from chat history via Telegram API
-	// For now, return 0 to force send as new message
-	return 0
+// sendOrEditWithWorkBack is a convenience for work-related error messages.
+func (b *Bot) sendOrEditWithWorkBack(chatID, msgID int, text string) {
+	b.sendOrEdit(chatID, msgID, text,
+		[][]InlineButton{{{Text: "◀ Назад", Data: "menu:work"}}})
 }
 
 func (b *Bot) isUpdateProcessed(ctx context.Context, updateID int) bool {
@@ -1851,15 +1791,15 @@ func eventEmoji(eventType string) string {
 
 func resourceName(resID string) string {
 	names := map[string]string{
-		"R1": "Продовольствие",
-		"R2": "Руда",
-		"R3": "Древесина",
-		"R4": "Топливо",
-		"R5": "Энергия",
-		"R6": "Металл",
-		"R7": "Материалы",
-		"R8": "Химикаты",
-		"R9": "Технологии",
+		"R1":  "Продовольствие",
+		"R2":  "Руда",
+		"R3":  "Древесина",
+		"R4":  "Топливо",
+		"R5":  "Энергия",
+		"R6":  "Металл",
+		"R7":  "Материалы",
+		"R8":  "Химикаты",
+		"R9":  "Технологии",
 		"R10": "Потребтовары",
 	}
 	if n, ok := names[resID]; ok {
