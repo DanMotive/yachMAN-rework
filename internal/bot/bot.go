@@ -589,6 +589,7 @@ func (b *Bot) showDaily(ctx context.Context, chatID, userID int64, msgID int) {
 // CITIES
 // ────────────────────────────────────────────────────────────────────────────
 
+
 func (b *Bot) showCitiesList(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil {
@@ -596,20 +597,15 @@ func (b *Bot) showCitiesList(ctx context.Context, chatID, userID int64, msgID in
 		return
 	}
 
-	// Current city info (compact)
 	text := ""
 	if user.CityID != nil {
 		city, err := b.services.City.GetCityByID(ctx, *user.CityID)
 		if err == nil {
 			players, _ := b.services.City.GetPlayerCount(ctx, city.ID)
-			text = fmt.Sprintf("📍 %s — %s | 👥 %d
-
-", city.Name, city.Level, players)
+			text = fmt.Sprintf("📍 %s — %s | 👥 %d", city.Name, city.Level, players)
 		}
 	} else {
-		text = "📍 Вы не в городе
-
-"
+		text = "📍 Вы не в городе"
 	}
 
 	cities, _ := b.services.City.ListPublicCities(ctx)
@@ -621,7 +617,6 @@ func (b *Bot) showCitiesList(ctx context.Context, chatID, userID int64, msgID in
 			{Text: "🚪 Покинуть", Data: "city_leave"},
 		})
 	} else {
-		// Join buttons — max 8 to fit in keyboard
 		for i, c := range cities {
 			if i >= 8 {
 				break
@@ -635,6 +630,9 @@ func (b *Bot) showCitiesList(ctx context.Context, chatID, userID int64, msgID in
 	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:main"}})
 	b.sendOrEdit(chatID, msgID, text, buttons)
 }
+
+func (b *Bot) showCityQuick(ctx context.Context, chatID, userID int64, msgID int) {
+	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil || user.CityID == nil {
 		b.sendOrEdit(chatID, msgID, "❌ Вы не в городе",
 			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:cities"}}})
@@ -642,7 +640,6 @@ func (b *Bot) showCitiesList(ctx context.Context, chatID, userID int64, msgID in
 	}
 	b.showCityInfo(ctx, chatID, *user.CityID, msgID, "menu:cities")
 }
-
 func (b *Bot) showCityInfo(ctx context.Context, chatID, cityID int64, msgID int, backData string) {
 	city, err := b.services.City.GetCityByID(ctx, cityID)
 	if err != nil {
@@ -1354,7 +1351,7 @@ func (b *Bot) handleCallback(ctx context.Context, cb *CallbackQuery) {
 	switch {
 
 	// ── Menu navigation ──────────────────────────────
-tcase data == "noop":
+	case data == "noop":
 		b.answerCallback(cb.ID, "")
 	case data == "menu:main":
 		// Main menu always creates a new message (clean entry point)
