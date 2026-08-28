@@ -17,6 +17,16 @@ func NewCityService(pool *pgxpool.Pool) *CityService {
 	return &CityService{pool: pool}
 }
 
+// resolveInternalID converts a Telegram user_id to the internal users.id.
+func (s *CityService) resolveInternalID(ctx context.Context, tx pgx.Tx, telegramID int64) (int64, error) {
+	var internalID int64
+	err := tx.QueryRow(ctx, `SELECT id FROM users WHERE telegram_user_id = $1`, telegramID).Scan(&internalID)
+	if err != nil {
+		return 0, fmt.Errorf("сначала выполните /start в боте")
+	}
+	return internalID, nil
+}
+
 func (s *CityService) GetCityByChatID(ctx context.Context, chatID int64) (*models.City, error) {
 	var c models.City
 	err := s.pool.QueryRow(ctx,
@@ -51,12 +61,18 @@ func (s *CityService) GetCityByID(ctx context.Context, cityID int64) (*models.Ci
 	return &c, nil
 }
 
-func (s *CityService) RegisterCity(ctx context.Context, chatID int64, name string, mayorUserID int64) error {
+func (s *CityService) RegisterCity(ctx context.Context, chatID int64, name string, mayorTGID int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+
+	// Resolve internal user ID from Telegram user ID
+	mayorID, err := s.resolveInternalID(ctx, tx, mayorTGID)
+	if err != nil {
+		return err
+	}
 
 	var count int
 	err = tx.QueryRow(ctx, `SELECT COUNT(*) FROM cities WHERE chat_id = $1`, chatID).Scan(&count)
@@ -70,25 +86,25 @@ func (s *CityService) RegisterCity(ctx context.Context, chatID int64, name strin
 	var cityID int64
 	err = tx.QueryRow(ctx,
 		`INSERT INTO cities (chat_id, name, mayor_user_id) VALUES ($1, $2, $3) RETURNING id`,
-		chatID, name, mayorUserID).Scan(&cityID)
+		chatID, name, mayorID).Scan(&cityID)
 	if err != nil {
 		return err
 	}
 
 	_, err = tx.Exec(ctx,
 		`INSERT INTO city_members (city_id, user_id, role) VALUES ($1, $2, 'mayor')`,
-		cityID, mayorUserID)
+		cityID, mayorID)
 	if err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx,
 		`INSERT INTO city_admins (city_id, user_id, position) VALUES ($1, $2, 'mayor')`,
-		cityID, mayorUserID)
+		cityID, mayorID)
 	if err != nil {
 		return err
 	}
 
-	_, err = tx.Exec(ctx, `UPDATE users SET city_id = $1 WHERE id = $2`, cityID, mayorUserID)
+	_, err = tx.Exec(ctx, `UPDATE users SET city_id = $1 WHERE id = $2`, cityID, mayorID)
 	if err != nil {
 		return err
 	}
@@ -96,12 +112,18 @@ func (s *CityService) RegisterCity(ctx context.Context, chatID int64, name strin
 	return tx.Commit(ctx)
 }
 
-func (s *CityService) JoinCity(ctx context.Context, userID int64, cityID int64) error {
+func (s *CityService) JoinCity(ctx context.Context, telegramUserID int64, cityID int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+
+	// Resolve internal user ID
+	userID, err := s.resolveInternalID(ctx, tx, telegramUserID)
+	if err != nil {
+		return err
+	}
 
 	var currentCity *int64
 	err = tx.QueryRow(ctx, `SELECT city_id FROM users WHERE id = $1`, userID).Scan(&currentCity)
@@ -137,12 +159,18 @@ func (s *CityService) JoinCity(ctx context.Context, userID int64, cityID int64) 
 	return tx.Commit(ctx)
 }
 
-func (s *CityService) LeaveCity(ctx context.Context, userID int64) error {
+func (s *CityService) LeaveCity(ctx context.Context, telegramUserID int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+
+	// Resolve internal user ID
+	userID, err := s.resolveInternalID(ctx, tx, telegramUserID)
+	if err != nil {
+		return err
+	}
 
 	var cityID *int64
 	err = tx.QueryRow(ctx, `SELECT city_id FROM users WHERE id = $1 FOR UPDATE`, userID).
@@ -207,7 +235,6 @@ func (s *CityService) IsAdmin(ctx context.Context, userID int64, cityID int64) (
 }
 
 // RecalculateCityLevels updates city levels based on DP thresholds.
-// Called by scheduler every 6 hours.
 func (s *CityService) RecalculateCityLevels(ctx context.Context) (int, error) {
 	type levelSpec struct {
 		name string
@@ -218,13 +245,11 @@ func (s *CityService) RecalculateCityLevels(ctx context.Context) (int, error) {
 		{"urban_type", 50}, {"small_city", 80}, {"city", 120}, {"big_city", 180},
 		{"million_city", 260}, {"metropolis", 360}, {"megalopolis", 500},
 	}
-
 	rows, err := s.pool.Query(ctx, `SELECT id, development_points FROM cities`)
 	if err != nil {
 		return 0, err
 	}
 	defer rows.Close()
-
 	count := 0
 	for rows.Next() {
 		var cityID int64
@@ -244,20 +269,18 @@ func (s *CityService) RecalculateCityLevels(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-// UpdateCityTurnoverDP adds DP based on taxable turnover.
-// +1 DP per 10,000₽ of city treasury inflow.
+// UpdateCityTurnoverDP adds DP based on treasury inflow.
 func (s *CityService) UpdateCityTurnoverDP(ctx context.Context) (int, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, treasury FROM cities`)
+	rows, err := s.pool.Query(ctx, `SELECT id, treasury FROM cities`)
 	if err != nil {
 		return 0, err
 	}
 	defer rows.Close()
-
 	count := 0
 	for rows.Next() {
 		var cityID int64
 		var treasury int
+		if er
 		if err := rows.Scan(&cityID, &treasury); err != nil {
 			continue
 		}
