@@ -21,14 +21,14 @@ type WorkService struct {
 
 func NewWorkService(pool *pgxpool.Pool, ledger *LedgerService, users *UserService) *WorkService {
 	return &WorkService{pool: pool, ledger: ledger, users: users}
-nfunc (s *WorkService) resolveInternalID(ctx context.Context, tx pgx.Tx, telegramID int64) (int64, error) {
+
+func (s *WorkService) resolveInternalID(ctx context.Context, tx pgx.Tx, telegramID int64) (int64, error) {
 	var id int64
 	err := tx.QueryRow(ctx, `SELECT id FROM users WHERE telegram_user_id = $1`, telegramID).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("пользователь не найден: выполните /start")
 	}
 	return id, nil
-}
 }
 
 func (s *WorkService) GetWorkDefinition(ctx context.Context, workID string) (*models.WorkDefinition, error) {
