@@ -280,7 +280,6 @@ func (s *CityService) UpdateCityTurnoverDP(ctx context.Context) (int, error) {
 	for rows.Next() {
 		var cityID int64
 		var treasury int
-		if er
 		if err := rows.Scan(&cityID, &treasury); err != nil {
 			continue
 		}
