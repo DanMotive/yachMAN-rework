@@ -900,10 +900,8 @@ func (b *Bot) showStudyMenu(ctx context.Context, chatID, userID int64, msgID int
 	var buttons [][]InlineButton
 
 	// Active courses — compact buttons
-	hasActive := false
 	for _, e := range educations {
 		if !e.Completed {
-			hasActive = true
 			prog, _ := b.services.Education.GetProgram(ctx, e.ProgramID)
 			name := e.ProgramID
 			lessons := 0
