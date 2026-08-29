@@ -1,4 +1,4 @@
-package bot
+﻿package bot
 
 import (
 	"context"
@@ -205,15 +205,9 @@ func (b *Bot) handleMessage(ctx context.Context, msg *TGMessage) {
 
 	// ── Group commands ───────────────────────────────
 	case "/work":
-		if isGroup {
-			b.showWorkDirections(ctx, chatID, userID, 0)
-		}
+		b.showWorkDirections(ctx, chatID, userID, 0)
 	case "/jobs":
-		if isGroup {
-			b.showWorkDirections(ctx, chatID, userID, 0)
-		} else {
-			b.showActiveWork(ctx, chatID, userID)
-		}
+		b.showJobs(ctx, chatID, userID, 0)
 	case "/city":
 		if isGroup {
 			b.handleCityGroup(ctx, chatID, userID, args)
@@ -900,6 +894,62 @@ func (b *Bot) showActiveWork(ctx context.Context, chatID, userID int64) {
 
 	remaining := time.Until(run.FinishesAt)
 	b.sendMessage(chatID, fmt.Sprintf(
+
+// showJobs shows active work status + available work directions
+func (b *Bot) showJobs(ctx context.Context, chatID, userID int64, msgID int) {
+	internalID, err := b.resolveTGID(ctx, userID)
+	if err != nil {
+		b.sendOrEdit(chatID, msgID, "❌ Профиль не найден",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
+		return
+	}
+
+	user, _ := b.services.User.GetUserByTGID(ctx, userID)
+
+	text := "👷 Мои работы\n\n"
+	buttons := [][]InlineButton{}
+
+	// Active work
+	if user.ActiveJob != nil {
+		run, workName, err2 := b.services.Work.GetActiveWork(ctx, internalID)
+		if err2 == nil {
+			remaining := time.Until(run.FinishesAt)
+			text += fmt.Sprintf("🔨 Выполняется: %s\n⏱ Осталось: %s\n⏰ Завершится: %s\n\n",
+				workName, formatDuration(remaining), run.FinishesAt.Format("15:04"))
+		}
+	} else {
+		text += "📭 Нет активной работы\n\n"
+	}
+
+	// Available directions with XP
+	if user.CityID != nil {
+		text += "📌 Доступные направления:\n"
+		skills, _ := b.services.User.GetSkills(ctx, user.ID)
+		skillMap := make(map[string]int)
+		for _, s := range skills {
+			skillMap[s.Direction] = s.XP
+		}
+
+		for i := 0; i < len(enums.AllSkillDirections); i += 2 {
+			var row []InlineButton
+			for j := 0; j < 2 && i+j < len(enums.AllSkillDirections); j++ {
+				dir := enums.AllSkillDirections[i+j]
+				xp := skillMap[string(dir)]
+				row = append(row, InlineButton{
+					Text: fmt.Sprintf("%s %s %d", directionEmoji(string(dir)), dir, xp),
+					Data: fmt.Sprintf("work_dir:%s", dir),
+				})
+			}
+			buttons = append(buttons, row)
+		}
+	} else {
+		text += "🏙 Вступите в город, чтобы работать\n"
+		buttons = append(buttons, []InlineButton{{Text: "🏙 Города", Data: "menu:cities"}})
+	}
+
+	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:main"}})
+	b.sendOrEdit(chatID, msgID, text, buttons)
+}
 		"🔨 Активная работа\n\n%s\n⏱ Осталось: %s\n⏰ Завершится: %s",
 		workName, formatDuration(remaining), run.FinishesAt.Format("15:04")))
 }
@@ -914,7 +964,7 @@ func (b *Bot) showStudyMenu(ctx context.Context, chatID, userID int64, msgID int
 		return
 	}
 
-	educations, _ := b.services.Education.GetUserEducation(ctx, userID)
+	educations, _ := b.services.Education.GetUserEducation(ctx, user.ID)
 	var buttons [][]InlineButton
 
 	// Active courses — compact buttons
@@ -1282,7 +1332,8 @@ func (b *Bot) showHelp(ctx context.Context, chatID int64, msgID int) {
 }
 func (b *Bot) showGroupHelp(ctx context.Context, chatID int64) {
 	text := "🏗 Команды города:\n\n" +
-		"🔨 /work — начать работу\n" +
+		"🔨 /work — выбрать направление\n" +
+		"👷 /jobs — моя работа / доступные\n" +
 		"🏙 /city — информация о городе\n" +
 		"🏙 /city register Название — создать город\n" +
 		"🏙 /city leave — покинуть город\n" +
@@ -1297,7 +1348,7 @@ func (b *Bot) showGroupHelp(ctx context.Context, chatID int64) {
 		"/start, /profile, /balance, /daily, /study, /help"
 	buttons := [][]InlineButton{
 		{
-			{Text: "🔨 Работа", Data: "noop"},
+			{Text: "🔨 Работа", Data: "menu:work"},
 			{Text: "🏙 Город", Data: "noop"},
 		},
 		{
@@ -1308,7 +1359,6 @@ func (b *Bot) showGroupHelp(ctx context.Context, chatID int64) {
 	}
 	b.sendMessageWithButtons(chatID, text, buttons)
 }
-
 // ────────────────────────────────────────────────────────────────────────────
 // PAY
 // ────────────────────────────────────────────────────────────────────────────
