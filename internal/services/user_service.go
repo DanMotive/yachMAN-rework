@@ -105,6 +105,18 @@ func (s *UserService) AddXP(ctx context.Context, tx pgx.Tx, userID int64, direct
 	return err
 }
 
+
+// ResolveInternalID converts a Telegram user ID to the internal users.id.
+// Returns an error if the user has not been created yet (no /start).
+func (s *UserService) ResolveInternalID(ctx context.Context, telegramUserID int64) (int64, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx, `SELECT id FROM users WHERE telegram_user_id = $1`, telegramUserID).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("пользователь не найден: выполните /start")
+	}
+	return id, nil
+}
+
 func (s *UserService) ClaimDailyBonus(ctx context.Context, userID int64) (int, error) {
 	var bonus int
 

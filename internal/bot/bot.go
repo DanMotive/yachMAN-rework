@@ -460,7 +460,13 @@ func (b *Bot) showProfile(ctx context.Context, chatID, userID int64, msgID int) 
 }
 
 func (b *Bot) showSkills(ctx context.Context, chatID, userID int64, msgID int) {
-	skills, err := b.services.User.GetSkills(ctx, userID)
+	internalID, err := b.resolveTGID(ctx, userID)
+	if err != nil {
+		b.sendOrEdit(chatID, msgID, "❌ Профиль не найден",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:profile"}}})
+		return
+	}
+	skills, err := b.services.User.GetSkills(ctx, internalID)
 	if err != nil || len(skills) == 0 {
 		b.sendOrEdit(chatID, msgID, "📈 Нет данных о навыках",
 			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:profile"}}})
@@ -481,9 +487,14 @@ func (b *Bot) showSkills(ctx context.Context, chatID, userID int64, msgID int) {
 	}
 	b.sendOrEdit(chatID, msgID, text, buttons)
 }
-
 func (b *Bot) showUserEducation(ctx context.Context, chatID, userID int64, msgID int) {
-	educations, err := b.services.Education.GetUserEducation(ctx, userID)
+	internalID, err := b.resolveTGID(ctx, userID)
+	if err != nil {
+		b.sendOrEdit(chatID, msgID, "❌ Профиль не найден",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:profile"}}})
+		return
+	}
+	educations, err := b.services.Education.GetUserEducation(ctx, internalID)
 	if err != nil || len(educations) == 0 {
 		b.sendOrEdit(chatID, msgID, "🎓 Нет записей об обучении",
 			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:profile"}}})
@@ -520,8 +531,11 @@ func (b *Bot) showUserEducation(ctx context.Context, chatID, userID int64, msgID
 		buttons = append(buttons, []InlineButton{{
 			Text: fmt.Sprintf("📖 Урок: %s", e.ProgramID),
 			Data: fmt.Sprintf("study_lesson:%s", e.ProgramID),
-		}})
+		})
 	}
+	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:profile"}})
+	b.sendOrEdit(chatID, msgID, text, buttons)
+}
 	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:profile"}})
 	b.sendOrEdit(chatID, msgID, text, buttons)
 }
@@ -873,7 +887,12 @@ func (b *Bot) startWork(ctx context.Context, chatID, userID int64, workID string
 }
 
 func (b *Bot) showActiveWork(ctx context.Context, chatID, userID int64) {
-	run, workName, err := b.services.Work.GetActiveWork(ctx, userID)
+	internalID, err := b.resolveTGID(ctx, userID)
+	if err != nil {
+		b.sendMessage(chatID, "❌ Профиль не найден")
+		return
+	}
+	run, workName, err := b.services.Work.GetActiveWork(ctx, internalID)
 	if err != nil {
 		b.sendMessage(chatID, "📭 Нет активной работы.\n\nИспользуйте /jobs для просмотра работ.")
 		return
@@ -884,7 +903,6 @@ func (b *Bot) showActiveWork(ctx context.Context, chatID, userID int64) {
 		"🔨 Активная работа\n\n%s\n⏱ Осталось: %s\n⏰ Завершится: %s",
 		workName, formatDuration(remaining), run.FinishesAt.Format("15:04")))
 }
-
 // ────────────────────────────────────────────────────────────────────────────
 // STUDY
 // ────────────────────────────────────────────────────────────────────────────
@@ -951,7 +969,13 @@ func (b *Bot) showStudyMenu(ctx context.Context, chatID, userID int64, msgID int
 	b.sendOrEdit(chatID, msgID, "📚 Обучение:", buttons)
 }
 func (b *Bot) showNotifications(ctx context.Context, chatID, userID int64, msgID int) {
-	notifs, err := b.services.Notif.GetUnread(ctx, userID)
+	internalID, err := b.resolveTGID(ctx, userID)
+	if err != nil {
+		b.sendOrEdit(chatID, msgID, "❌ Профиль не найден",
+			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
+		return
+	}
+	notifs, err := b.services.Notif.GetUnread(ctx, internalID)
 	if err != nil || len(notifs) == 0 {
 		b.sendOrEdit(chatID, msgID, "📭 Нет новых уведомлений",
 			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
@@ -969,7 +993,6 @@ func (b *Bot) showNotifications(ctx context.Context, chatID, userID int64, msgID
 	}
 	b.sendOrEdit(chatID, msgID, text, buttons)
 }
-
 // ────────────────────────────────────────────────────────────────────────────
 // MARKET
 // ────────────────────────────────────────────────────────────────────────────
@@ -1009,13 +1032,13 @@ func (b *Bot) showMarket(ctx context.Context, chatID, userID int64, msgID int) {
 // ────────────────────────────────────────────────────────────────────────────
 
 func (b *Bot) showBusiness(ctx context.Context, chatID, userID int64, msgID int) {
-	_, err := b.services.User.GetUserByTGID(ctx, userID)
+	user, err := b.services.User.GetUserByTGID(ctx, userID)
 	if err != nil {
 		b.sendMessage(chatID, "❌ Профиль не найден")
 		return
 	}
 
-	businesses, err := b.services.Business.ListUserBusinesses(ctx, userID)
+	businesses, err := b.services.Business.ListUserBusinesses(ctx, user.ID)
 	if err != nil || len(businesses) == 0 {
 		b.sendOrEdit(chatID, msgID, "🏭 У вас нет предприятий\n\nПредприятия создаёт мэр города.",
 			[][]InlineButton{{{Text: "◀ Назад", Data: "menu:main"}}})
@@ -1034,7 +1057,6 @@ func (b *Bot) showBusiness(ctx context.Context, chatID, userID int64, msgID int)
 	}
 	b.sendOrEdit(chatID, msgID, text, buttons)
 }
-// COMPANY
 // ────────────────────────────────────────────────────────────────────────────
 
 func (b *Bot) showCompany(ctx context.Context, chatID, userID int64, msgID int) {
@@ -1259,19 +1281,32 @@ func (b *Bot) showHelp(ctx context.Context, chatID int64, msgID int) {
 	b.sendOrEdit(chatID, msgID, "❓ Навигация:", buttons)
 }
 func (b *Bot) showGroupHelp(ctx context.Context, chatID int64) {
-	b.sendMessage(chatID,
-		"🏗 Команды города:\n\n"+
-			"/work — начать работу\n"+
-			"/city — информация\n"+
-			"/city register Название — создать город\n"+
-			"/city leave — покинуть город\n"+
-			"/market — рынок\n"+
-			"/business — предприятия\n"+
-			"/company — корпорация\n"+
-			"/stock — акции\n"+
-			"/trade — контракты\n"+
-			"/events — события\n"+
-			"/pay — перевод")
+	text := "🏗 Команды города:\n\n" +
+		"🔨 /work — начать работу\n" +
+		"🏙 /city — информация о городе\n" +
+		"🏙 /city register Название — создать город\n" +
+		"🏙 /city leave — покинуть город\n" +
+		"📈 /market — рынок ресурсов\n" +
+		"🏭 /business — предприятия\n" +
+		"🏢 /company — корпорация\n" +
+		"📊 /stock — акции\n" +
+		"📋 /trade — контракты\n" +
+		"🎯 /events — события\n" +
+		"💸 /pay @user сумма — перевод\n\n" +
+		"📱 Личные команды (в ЛС бота):\n" +
+		"/start, /profile, /balance, /daily, /study, /help"
+	buttons := [][]InlineButton{
+		{
+			{Text: "🔨 Работа", Data: "noop"},
+			{Text: "🏙 Город", Data: "noop"},
+		},
+		{
+			{Text: "📈 Рынок", Data: "noop"},
+			{Text: "🎯 События", Data: "noop"},
+		},
+		{{Text: "💡 Откройте ЛС для полного меню", Data: "noop"}},
+	}
+	b.sendMessageWithButtons(chatID, text, buttons)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1393,7 +1428,12 @@ func (b *Bot) handleCallback(ctx context.Context, cb *CallbackQuery) {
 
 	// ── Daily ────────────────────────────────────────
 	case data == "daily_claim":
-		bonus, err := b.services.User.ClaimDailyBonus(ctx, userID)
+		internalID, resolveErr := b.resolveTGID(ctx, userID)
+		if resolveErr != nil {
+			b.answerCallback(cb.ID, "❌ Ошибка")
+			return
+		}
+		bonus, err := b.services.User.ClaimDailyBonus(ctx, internalID)
 		if err != nil {
 			b.answerCallback(cb.ID, "❌ "+err.Error())
 			return
@@ -1438,7 +1478,10 @@ func (b *Bot) handleCallback(ctx context.Context, cb *CallbackQuery) {
 
 	// ── Notifications ────────────────────────────────
 	case data == "notif_read":
-		b.services.Notif.MarkRead(ctx, userID)
+		notifInternalID, resolveErr := b.resolveTGID(ctx, userID)
+		if resolveErr == nil {
+			b.services.Notif.MarkRead(ctx, notifInternalID)
+		}
 		b.answerCallback(cb.ID, "✅ Все прочитано")
 		b.showNotifications(ctx, chatID, userID, msgID)
 
@@ -1576,6 +1619,11 @@ func (b *Bot) sendOrEdit(chatID int64, msgID int, text string, buttons [][]Inlin
 	b.sendMessageWithButtons(chatID, text, buttons)
 }
 
+
+// resolveTGID converts a Telegram user ID to the internal user ID.
+func (b *Bot) resolveTGID(ctx context.Context, telegramUserID int64) (int64, error) {
+	return b.services.User.ResolveInternalID(ctx, telegramUserID)
+}
 func (b *Bot) answerCallback(callbackID, text string) {
 	data := url.Values{
 		"callback_query_id": {callbackID},

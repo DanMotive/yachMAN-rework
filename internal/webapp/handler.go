@@ -161,7 +161,12 @@ func (h *Handler) getMySkills(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
-	skills, err := h.services.User.GetSkills(r.Context(), uid)
+	user, err := h.services.User.GetUserByTGID(r.Context(), uid)
+	if err != nil {
+		http.Error(w, `{"error":"user not found"}`, http.StatusNotFound)
+		return
+	}
+	skills, err := h.services.User.GetSkills(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, `{"error":"failed"}`, http.StatusInternalServerError)
 		return
@@ -169,7 +174,6 @@ func (h *Handler) getMySkills(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"skills": skills})
 }
-
 func (h *Handler) startWork(w http.ResponseWriter, r *http.Request) {
 	uid, ok := UserIDFromContext(r)
 	if !ok {
