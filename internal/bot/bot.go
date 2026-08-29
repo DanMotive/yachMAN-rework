@@ -527,16 +527,6 @@ func (b *Bot) showUserEducation(ctx context.Context, chatID, userID int64, msgID
 			Data: fmt.Sprintf("study_lesson:%s", e.ProgramID),
 		})
 	}
-	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:profile"}})
-	b.sendOrEdit(chatID, msgID, text, buttons)
-}
-	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:profile"}})
-	b.sendOrEdit(chatID, msgID, text, buttons)
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// DAILY BONUS
-// ────────────────────────────────────────────────────────────────────────────
 
 func (b *Bot) showDaily(ctx context.Context, chatID, userID int64, msgID int) {
 	user, err := b.services.User.GetUserByTGID(ctx, userID)
@@ -877,8 +867,6 @@ func (b *Bot) startWork(ctx context.Context, chatID, userID int64, workID string
 	buttons := [][]InlineButton{
 		{{Text: "◀ К работам", Data: fmt.Sprintf("work_dir:%s", work.Direction)}},
 	}
-	b.sendOrEdit(chatID, msgID, text, buttons)
-}
 
 func (b *Bot) showActiveWork(ctx context.Context, chatID, userID int64) {
 	internalID, err := b.resolveTGID(ctx, userID)
@@ -894,6 +882,9 @@ func (b *Bot) showActiveWork(ctx context.Context, chatID, userID int64) {
 
 	remaining := time.Until(run.FinishesAt)
 	b.sendMessage(chatID, fmt.Sprintf(
+		"🔨 Активная работа\n\n%s\n⏱ Осталось: %s\n⏰ Завершится: %s",
+		workName, formatDuration(remaining), run.FinishesAt.Format("15:04")))
+}
 
 // showJobs shows active work status + available work directions
 func (b *Bot) showJobs(ctx context.Context, chatID, userID int64, msgID int) {
@@ -950,10 +941,15 @@ func (b *Bot) showJobs(ctx context.Context, chatID, userID int64, msgID int) {
 	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:main"}})
 	b.sendOrEdit(chatID, msgID, text, buttons)
 }
-		"🔨 Активная работа\n\n%s\n⏱ Осталось: %s\n⏰ Завершится: %s",
-		workName, formatDuration(remaining), run.FinishesAt.Format("15:04")))
+		}
+	} else {
+		text += "🏙 Вступите в город, чтобы работать\n"
+		buttons = append(buttons, []InlineButton{{Text: "🏙 Города", Data: "menu:cities"}})
+	}
+
+	buttons = append(buttons, []InlineButton{{Text: "◀ Назад", Data: "menu:main"}})
+	b.sendOrEdit(chatID, msgID, text, buttons)
 }
-// ────────────────────────────────────────────────────────────────────────────
 // STUDY
 // ────────────────────────────────────────────────────────────────────────────
 
